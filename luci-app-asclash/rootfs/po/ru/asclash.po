@@ -31,6 +31,9 @@ msgstr "Диагностика"
 msgid "Read-only overview of parser output and active network state."
 msgstr "Сводка результатов парсеров и текущего состояния сети. Только чтение."
 
+msgid "Read-only overview of parser output, Mihomo API and active network mode."
+msgstr "Сводка парсеров, API Mihomo и согласованности сетевого режима. Только чтение."
+
 msgid "Refresh diagnostics"
 msgstr "Обновить диагностику"
 
@@ -42,6 +45,9 @@ msgstr "Таблица firewall"
 
 msgid "Present"
 msgstr "Обнаружена"
+
+msgid "Missing"
+msgstr "Отсутствует"
 
 msgid "Missing / unreadable"
 msgstr "Отсутствует или недоступна"
@@ -201,6 +207,135 @@ msgstr "Для диагностики показаны последние под
 
 msgid "No parser or firewall warnings found in the current system log buffer."
 msgstr "В текущем буфере системного журнала предупреждений парсера или firewall не найдено."
+
+msgid "Clash service"
+msgstr "Служба Clash"
+
+msgid "Running"
+msgstr "Запущена"
+
+msgid "Stopped"
+msgstr "Остановлена"
+
+msgid "Mihomo API"
+msgstr "API Mihomo"
+
+msgid "nftables integration"
+msgstr "Интеграция nftables"
+
+msgid "Network mode"
+msgstr "Сетевой режим"
+
+msgid "Consistent"
+msgstr "Соответствует"
+
+msgid "Mismatch"
+msgstr "Есть расхождения"
+
+msgid "Parser notes: "
+msgstr "Замечания парсера: "
+
+msgid "No recent Fake-IP parser errors in the log buffer."
+msgstr "В недавних сообщениях журнала ошибок парсера Fake-IP нет."
+
+msgid "Network mode consistency"
+msgstr "Согласованность сетевого режима"
+
+msgid "Configured mode: "
+msgstr "Режим в настройках: "
+
+msgid "Unknown"
+msgstr "Неизвестен"
+
+msgid "Firewall chains"
+msgstr "Цепочки firewall"
+
+msgid "TPROXY rule and local route"
+msgstr "Правило TPROXY и локальный маршрут"
+
+msgid "TUN rule, interface and route"
+msgstr "Правило TUN, интерфейс и маршрут"
+
+msgid "Policy rule"
+msgstr "Правило policy routing"
+
+msgid "TUN interface and route"
+msgstr "Интерфейс TUN и маршрут"
+
+msgid "TPROXY rule"
+msgstr "Правило TPROXY"
+
+msgid "Local route in table 100"
+msgstr "Локальный маршрут в таблице 100"
+
+msgid "Configured network mode"
+msgstr "Сетевой режим не задан"
+
+msgid "Raw network details"
+msgstr "Подробные сетевые данные"
+
+msgid "nftables chains"
+msgstr "Цепочки nftables"
+
+msgid "TUN interface"
+msgstr "Интерфейс TUN"
+
+msgid "Not present"
+msgstr "Отсутствует"
+
+msgid "OK"
+msgstr "ОК"
+
+msgid "Needs attention"
+msgstr "Требует внимания"
+
+msgid "Problem"
+msgstr "Проблема"
+
+msgid "Not checked"
+msgstr "Не проверено"
+
+msgid "API controller is not configured."
+msgstr "Контроллер API не задан в конфигурации."
+
+msgid "API check skipped: controller is not bound to loopback."
+msgstr "Проверка API пропущена: контроллер не привязан к loopback."
+
+msgid "API controller address is invalid or unsupported."
+msgstr "Адрес контроллера API некорректен или не поддерживается."
+
+msgid "Mihomo API is reachable but requires authentication (HTTP %d)."
+msgstr "API Mihomo доступен, но требует авторизации (HTTP %d)."
+
+msgid "API returned HTTP %d."
+msgstr "API вернул HTTP %d."
+
+msgid "Mihomo API did not respond."
+msgstr "API Mihomo не ответил."
+
+msgid "Mihomo API version: %s"
+msgstr "Версия API Mihomo: %s"
+
+msgid "Mihomo API responded; version was not reported."
+msgstr "API Mihomo ответил, но не сообщил версию."
+
+msgid "API returned an unexpected response (HTTP %d)."
+msgstr "API вернул неожиданный ответ (HTTP %d)."
+
+msgid "Provider file missing"
+msgstr "Не найден файл provider-а"
+
+msgid "Provider is not defined"
+msgstr "Provider не объявлен"
+
+msgid "Provider could not be parsed"
+msgstr "Не удалось разобрать provider"
+
+msgid "No referenced providers could be parsed"
+msgstr "Не удалось разобрать ни один указанный provider"
+
+msgid "Recent parser and firewall messages"
+msgstr "Последние сообщения парсера и firewall"
 
 ### Общие строки ###
 

@@ -29,6 +29,9 @@ msgstr "诊断"
 msgid "Read-only overview of parser output and active network state."
 msgstr "解析器输出和当前网络状态的只读概览。"
 
+msgid "Read-only overview of parser output, Mihomo API and active network mode."
+msgstr "解析器、Mihomo API 和网络模式一致性的只读概览。"
+
 msgid "Refresh diagnostics"
 msgstr "刷新诊断"
 
@@ -40,6 +43,9 @@ msgstr "防火墙表"
 
 msgid "Present"
 msgstr "已存在"
+
+msgid "Missing"
+msgstr "缺失"
 
 msgid "Missing / unreadable"
 msgstr "缺失或不可读取"
@@ -199,6 +205,135 @@ msgstr "显示最近匹配的日志行以便排查问题。日志缓冲区可能
 
 msgid "No parser or firewall warnings found in the current system log buffer."
 msgstr "当前系统日志缓冲区中未发现解析器或防火墙警告。"
+
+msgid "Clash service"
+msgstr "Clash 服务"
+
+msgid "Running"
+msgstr "运行中"
+
+msgid "Stopped"
+msgstr "已停止"
+
+msgid "Mihomo API"
+msgstr "Mihomo API"
+
+msgid "nftables integration"
+msgstr "nftables 集成"
+
+msgid "Network mode"
+msgstr "网络模式"
+
+msgid "Consistent"
+msgstr "一致"
+
+msgid "Mismatch"
+msgstr "不一致"
+
+msgid "Parser notes: "
+msgstr "解析器提示："
+
+msgid "No recent Fake-IP parser errors in the log buffer."
+msgstr "日志缓冲区中没有近期 Fake-IP 解析器错误。"
+
+msgid "Network mode consistency"
+msgstr "网络模式一致性"
+
+msgid "Configured mode: "
+msgstr "配置的模式："
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Firewall chains"
+msgstr "防火墙链"
+
+msgid "TPROXY rule and local route"
+msgstr "TPROXY 规则和本地路由"
+
+msgid "TUN rule, interface and route"
+msgstr "TUN 规则、接口和路由"
+
+msgid "Policy rule"
+msgstr "策略路由规则"
+
+msgid "TUN interface and route"
+msgstr "TUN 接口和路由"
+
+msgid "TPROXY rule"
+msgstr "TPROXY 规则"
+
+msgid "Local route in table 100"
+msgstr "表 100 中的本地路由"
+
+msgid "Configured network mode"
+msgstr "未设置网络模式"
+
+msgid "Raw network details"
+msgstr "原始网络详情"
+
+msgid "nftables chains"
+msgstr "nftables 链"
+
+msgid "TUN interface"
+msgstr "TUN 接口"
+
+msgid "Not present"
+msgstr "不存在"
+
+msgid "OK"
+msgstr "正常"
+
+msgid "Needs attention"
+msgstr "需要注意"
+
+msgid "Problem"
+msgstr "异常"
+
+msgid "Not checked"
+msgstr "未检查"
+
+msgid "API controller is not configured."
+msgstr "未配置 API 控制器。"
+
+msgid "API check skipped: controller is not bound to loopback."
+msgstr "已跳过 API 检查：控制器未绑定到 loopback。"
+
+msgid "API controller address is invalid or unsupported."
+msgstr "API 控制器地址无效或不受支持。"
+
+msgid "Mihomo API is reachable but requires authentication (HTTP %d)."
+msgstr "Mihomo API 可访问，但需要身份验证（HTTP %d）。"
+
+msgid "API returned HTTP %d."
+msgstr "API 返回 HTTP %d。"
+
+msgid "Mihomo API did not respond."
+msgstr "Mihomo API 无响应。"
+
+msgid "Mihomo API version: %s"
+msgstr "Mihomo API 版本：%s"
+
+msgid "Mihomo API responded; version was not reported."
+msgstr "Mihomo API 已响应，但未提供版本信息。"
+
+msgid "API returned an unexpected response (HTTP %d)."
+msgstr "API 返回了意外响应（HTTP %d）。"
+
+msgid "Provider file missing"
+msgstr "提供程序文件缺失"
+
+msgid "Provider is not defined"
+msgstr "未定义提供程序"
+
+msgid "Provider could not be parsed"
+msgstr "无法解析提供程序"
+
+msgid "No referenced providers could be parsed"
+msgstr "无法解析任何被引用的提供程序"
+
+msgid "Recent parser and firewall messages"
+msgstr "近期解析器和防火墙消息"
 
 msgid "Please wait"
 msgstr "请稍候"

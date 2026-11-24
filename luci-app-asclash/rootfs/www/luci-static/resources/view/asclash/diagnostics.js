@@ -1,17 +1,14 @@
 'use strict';
 'require view';
 'require fs';
-'require ui';
+'require view.asclash.utils';
 
 const FILES = {
 	config: '/opt/clash/config.yaml',
 	settings: '/opt/clash/settings',
 	whitelist: '/opt/clash/lst/fakeip-whitelist-summary.txt',
 	grouped: '/opt/clash/lst/fakeip-port-summary.txt',
-	groupedStats: '/tmp/clash/fakeip_port_groups.stats',
-	parserDiagnostics: '/tmp/clash/fakeip_port_parser_diagnostics.txt',
-	groupedDigest: '/tmp/clash/fakeip_port_groups.digest',
-	batchDigest: '/tmp/clash/fakeip_port_groups.nft.digest'
+	parserDiagnostics: '/tmp/clash/fakeip_port_parser_diagnostics.txt'
 };
 
 async function read(path) {
@@ -21,9 +18,9 @@ async function read(path) {
 async function command(path, args) {
 	try {
 		const result = await fs.exec(path, args);
-		return { ok: result.code === 0, output: String(result.stdout || '').trim(), error: String(result.stderr || '').trim() };
+		return { ok: result.code === 0, code: result.code, output: String(result.stdout || '').trim(), error: String(result.stderr || '').trim() };
 	} catch (e) {
-		return { ok: false, output: '', error: e.message || String(e) };
+		return { ok: false, code: null, output: '', error: e.message || String(e) };
 	}
 }
 
@@ -60,6 +57,100 @@ function parseWhitelistSummary(text) {
 	});
 	const match = String(text || '').match(/^entries\|(\d+)$/m);
 	return { providers, total: match ? Number(match[1]) : providers.reduce((sum, row) => sum + row.count, 0) };
+}
+
+function readYamlScalar(text, key) {
+	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = String(text || '').match(new RegExp('^' + escaped + ':\\s*(.*?)\\s*$', 'm'));
+	if (!match) return '';
+	let value = match[1].replace(/\s+#.*$/, '').trim();
+	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+		value = value.slice(1, -1);
+	return value;
+}
+
+function getLocalMihomoApiUrl(config) {
+	// Diagnostics makes an unauthenticated, read-only request only to loopback;
+	// it never forwards the configured API secret or contacts a remote controller.
+	const plainAddress = readYamlScalar(config, 'external-controller');
+	const tlsAddress = readYamlScalar(config, 'external-controller-tls');
+	const raw = plainAddress || tlsAddress;
+	if (!raw) return { error: _('API controller is not configured.') };
+	try {
+		let address = raw;
+		if (!/^https?:\/\//i.test(address)) {
+			if (address.startsWith(':')) address = '127.0.0.1' + address;
+			else if (address.startsWith('0.0.0.0:')) address = '127.0.0.1:' + address.slice(8);
+			else if (address.startsWith('[::]:')) address = '[::1]:' + address.slice(5);
+			address = (raw === tlsAddress && !plainAddress ? 'https://' : 'http://') + address;
+		}
+		const url = new URL(address);
+		if (url.hostname === '0.0.0.0') url.hostname = '127.0.0.1';
+		if (url.hostname === '::' || url.hostname === '[::]') url.hostname = '[::1]';
+		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname))
+			return { error: _('API check skipped: controller is not bound to loopback.') };
+		url.pathname = url.pathname.replace(/\/$/, '') + '/version';
+		url.search = '';
+		url.hash = '';
+		return { url: url.toString() };
+	} catch (_e) {
+		return { error: _('API controller address is invalid or unsupported.') };
+	}
+}
+
+async function checkMihomoApi(config) {
+	const api = getLocalMihomoApiUrl(config);
+	if (api.error) return { state: 'unknown', detail: api.error };
+	const result = await command('curl', ['-sS', '--noproxy', '*', '--connect-timeout', '2', '--max-time', '4', '-w', '\\n%{http_code}', api.url]);
+	const output = result.output || '';
+	const statusMatch = output.match(/\n(\d{3})\s*$/);
+	const httpStatus = statusMatch ? Number(statusMatch[1]) : 0;
+	const body = statusMatch ? output.slice(0, statusMatch.index) : output;
+	if (httpStatus === 401 || httpStatus === 403)
+		return { state: 'warning', detail: _('Mihomo API is reachable but requires authentication (HTTP %d).').format(httpStatus) };
+	if (!result.ok || httpStatus < 200 || httpStatus >= 300)
+		return { state: 'error', detail: httpStatus ? _('API returned HTTP %d.').format(httpStatus) : _('Mihomo API did not respond.') };
+	try {
+		const payload = JSON.parse(body || '{}');
+		const version = String(payload.version || payload.Version || '').trim();
+		return { state: 'ok', detail: version ? _('Mihomo API version: %s').format(version) : _('Mihomo API responded; version was not reported.') };
+	} catch (_e) {
+		return { state: 'warning', detail: _('API returned an unexpected response (HTTP %d).').format(httpStatus) };
+	}
+}
+
+function formatGroupedSkipReason(reason) {
+	const labels = {
+		'malformed-rule-or-missing-action': _('Malformed rule or missing action'),
+		'missing-action': _('Missing action'),
+		'no-supported-ip-cidr-operand': _('No supported IP-CIDR or RULE-SET operand'),
+		'unsupported-or-multiple-network': _('Unsupported or multiple NETWORK conditions'),
+		'missing-or-multiple-dst-port': _('Missing or multiple DST-PORT conditions'),
+		'empty-dst-port': _('Empty DST-PORT condition')
+	};
+	if (labels[reason]) return labels[reason];
+	if (reason.startsWith('excluded-action-')) return _('Ignored action: %s').format(reason.slice('excluded-action-'.length));
+	return reason;
+}
+
+function summarizeFakeIpIssues(log) {
+	const issues = new Map();
+	for (const line of String(log || '').split(/\r?\n/)) {
+		if (!line.includes('Auto fakeip whitelist:')) continue;
+		let label = '';
+		if (/file not found/.test(line)) label = _('Provider file missing');
+		else if (/referenced but not defined/.test(line)) label = _('Provider is not defined');
+		else if (/could not be parsed/.test(line)) label = _('Provider could not be parsed');
+		else if (/none could be parsed/.test(line)) label = _('No referenced providers could be parsed');
+		if (label) issues.set(label, (issues.get(label) || 0) + 1);
+	}
+	return [...issues.entries()].map(([label, count]) => `${label} (${count})`);
+}
+
+function statePill(state) {
+	const colors = { ok: '#198754', warning: '#b7791f', error: '#b42336', unknown: '#667085' };
+	const labels = { ok: _('OK'), warning: _('Needs attention'), error: _('Problem'), unknown: _('Not checked') };
+	return E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${colors[state] || colors.unknown};color:#fff;font-size:12px;font-weight:600;white-space:nowrap;` }, labels[state] || labels.unknown);
 }
 
 function formatDiagnosticLogLine(line) {
@@ -101,20 +192,23 @@ function card(title, content) {
 return view.extend({
 	load: async function() {
 		const paths = Object.values(FILES);
-		const [fileValues, nft, rules, route100, route101, logread] = await Promise.all([
+		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning] = await Promise.all([
 			Promise.all(paths.map(read)),
 			command('/usr/sbin/nft', ['list', 'chains', 'inet']),
 			command('/sbin/ip', ['rule', 'show']),
 			command('/sbin/ip', ['route', 'show', 'table', '100']),
 			command('/sbin/ip', ['route', 'show', 'table', '101']),
-			command('/sbin/logread', ['-e', 'clash-rules'])
+			command('/sbin/ip', ['link', 'show', 'clash-tun']),
+			command('/sbin/logread', ['-e', 'clash-rules']),
+			view_asclash_utils.getClashRunning().catch(() => null)
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
-		return { files, nft, rules, route100, route101, logread, checkedAt: new Date().toLocaleString() };
+		const api = await checkMihomoApi(files[FILES.config]);
+		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, api, checkedAt: new Date().toLocaleString() };
 	},
 
 	render: function(data) {
-		const { files, nft, rules, route100, route101, logread, checkedAt } = data;
+		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
 		const groupedEnabled = !/^GROUPED_FAKEIP_PORT_RULES_ENABLED=false\s*$/mi.test(files[FILES.settings] || '');
@@ -122,47 +216,76 @@ return view.extend({
 		const parserReport = parserReportAvailable ? String(files[FILES.parserDiagnostics]).split(/\r?\n/).filter(Boolean).map(line => line.split('|')) : [];
 		const accepted = parserReportAvailable ? (Number((parserReport.find(row => row[0] === 'accepted') || [])[1]) || 0) : 0;
 		const skipped = parserReportAvailable ? parserReport.filter(row => row[0] === 'skipped') : [];
-		const nftOk = nft.ok && /table\s+inet\s+clash\s*\{\s*chain\s+(mangle|CLASH_MARK|proxy|output)\b/i.test(nft.output);
+		const modeMatch = String(files[FILES.settings] || '').match(/^PROXY_MODE=(\S+)/m);
+		const proxyMode = modeMatch ? modeMatch[1].toLowerCase() : 'unknown';
+		const hasClashTable = nft.ok && /table\s+inet\s+clash\b/i.test(nft.output);
+		const nftOk = hasClashTable && /chain\s+mangle\b/i.test(nft.output) && /chain\s+proxy\b/i.test(nft.output) && /chain\s+CLASH_MARK\b/i.test(nft.output);
 		const tproxyRule = /fwmark\s+0x0*1\s+.*lookup\s+100/i.test(rules.output);
 		const tunRule = /fwmark\s+0x0*3\s+.*lookup\s+101/i.test(rules.output);
-		const modeMatch = String(files[FILES.settings] || '').match(/^PROXY_MODE=(\S+)/m);
-		const mixedMode = !!(modeMatch && modeMatch[1].toLowerCase() === 'mixed');
-		const route100Ok = /\bdefault\b/.test(route100.output);
-		const route101Ok = /\bdefault\b/.test(route101.output);
-		const routingOk = tproxyRule && route100Ok && (!mixedMode || (tunRule && route101Ok));
+		const localRoute100 = /\blocal\s+default\b.*\bdev\s+lo\b/i.test(route100.output);
+		const tunRoute100 = /\bdefault\b.*\bdev\s+clash-tun\b/i.test(route100.output);
+		const tunRoute101 = /\bdefault\b.*\bdev\s+clash-tun\b/i.test(route101.output);
+		const tunInterface = tunLink.ok;
+		const routingChecks = {
+			tproxy: tproxyRule && localRoute100,
+			tun: tproxyRule && tunInterface && tunRoute100,
+			mixed: tproxyRule && localRoute100 && tunRule && tunInterface && tunRoute101
+		};
+		const routingOk = !!routingChecks[proxyMode] && nftOk;
+		const skippedCounts = new Map();
+		for (const row of skipped) {
+			const reason = formatGroupedSkipReason(row[1] || '');
+			skippedCounts.set(reason, (skippedCounts.get(reason) || 0) + (Number(row[2]) || 0));
+		}
+		const skippedSummary = [...skippedCounts.entries()].map(([reason, count]) => `${reason} (${count})`);
+		const fakeIpIssues = summarizeFakeIpIssues(logread.output);
 		const warnings = String(logread.output || '').split(/\r?\n/).filter(line => /skip|invalid|warning|error|failed|exceed|refus/i.test(line)).slice(-30).map(formatDiagnosticLogLine);
 
 		const summary = E('div', { 'class': 'table' }, [
 			E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:14px;align-items:center;' }, [
-				E('span', {}, [E('strong', {}, _('Firewall table')), ' ', statusPill(nftOk, _('Present'), _('Missing / unreadable'))]),
-				E('span', {}, [E('strong', {}, _('Policy routing')), ' ', statusPill(routingOk, _('Rules and routes found'), _('Expected rules or routes not found'))]),
-				E('span', {}, [E('strong', {}, _('Grouped parser')), ' ', statusPill(groupedEnabled && files[FILES.groupedDigest] && files[FILES.batchDigest], _('Generated batch available'), _('No generated batch'))])
+				E('span', {}, [E('strong', {}, _('Clash service')), ' ', serviceRunning == null ? statePill('unknown') : statusPill(serviceRunning, serviceRunning ? _('Running') : _('Stopped'))]),
+				E('span', {}, [E('strong', {}, _('Mihomo API')), ' ', statePill(api.state)]),
+				E('span', {}, [E('strong', {}, _('nftables integration')), ' ', statusPill(nftOk, _('Present'), _('Missing / unreadable'))]),
+				E('span', {}, [E('strong', {}, _('Network mode')), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))])
 			]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:10px 0 0;' }, _('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt))
+			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:10px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
 		]);
 
 		const fakeCard = card(_('Fake-IP whitelist parser'), E('div', {}, [
-			E('p', { 'style': 'margin:0;' }, [_('Generated entries: '), E('strong', {}, String(whitelist.total)), ' · ', _('Providers: '), E('strong', {}, String(whitelist.providers.length)), ' · ', _('CIDR entries: '), E('strong', {}, String(whitelist.total))])
+			E('p', { 'style': 'margin:0;' }, [_('Generated entries: '), E('strong', {}, String(whitelist.total)), ' · ', _('Providers: '), E('strong', {}, String(whitelist.providers.length))]),
+			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, [E('strong', {}, _('Parser notes: ')), fakeIpIssues.length ? fakeIpIssues.join('; ') : _('No recent Fake-IP parser errors in the log buffer.')])
 		]));
 
 		const groupedCard = card(_('Grouped AND rules'), E('div', {}, [
-			E('p', { 'style': 'margin:0;' }, [_('Accepted by parser: '), E('strong', {}, parserReportAvailable ? String(accepted) : '—'), ' · ', _('Skipped by parser: '), E('strong', {}, parserReportAvailable ? String(skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0)) : '—'), ' · ', _('Unique nft sets: '), E('strong', {}, String(grouped.sets.size)), ' · ', _('CIDR entries: '), E('strong', {}, String(grouped.total))])
+			E('p', { 'style': 'margin:0;' }, [_('Accepted by parser: '), E('strong', {}, parserReportAvailable ? String(accepted) : '—'), ' · ', _('Skipped by parser: '), E('strong', {}, parserReportAvailable ? String(skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0)) : '—'), ' · ', _('Unique nft sets: '), E('strong', {}, String(grouped.sets.size)), ' · ', _('CIDR entries: '), E('strong', {}, String(grouped.total))]),
+			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, [E('strong', {}, _('Parser notes: ')), parserReportAvailable ? (skippedSummary.length ? skippedSummary.join('; ') : _('No AND rules were skipped by the parser.')) : _('Parser diagnostics are not available because grouped rules are disabled or have not been generated yet.')])
 		]));
 
-		const routes = E('div', {}, [
-			E('h4', {}, _('ip rule')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, rules.output || rules.error || _('No output')),
-			E('h4', {}, _('Routing table 100')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route100.output || route100.error || _('Empty')),
-			E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty'))
-		]);
-		const networkCard = card(_('Firewall chains and policy routing'), E('div', {}, [
-			E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;' }, nft.output || nft.error || _('No output')),
-			routes
+		const modeLabel = proxyMode === 'mixed' ? 'MIXED' : proxyMode === 'tun' ? 'TUN' : proxyMode === 'tproxy' ? 'TPROXY' : _('Unknown');
+		const modeChecks = proxyMode === 'mixed'
+			? [[_('Firewall chains'), nftOk], [_('TPROXY rule and local route'), tproxyRule && localRoute100], [_('TUN rule, interface and route'), tunRule && tunInterface && tunRoute101]]
+			: proxyMode === 'tun'
+				? [[_('Firewall chains'), nftOk], [_('Policy rule'), tproxyRule], [_('TUN interface and route'), tunInterface && tunRoute100]]
+				: proxyMode === 'tproxy'
+					? [[_('Firewall chains'), nftOk], [_('TPROXY rule'), tproxyRule], [_('Local route in table 100'), localRoute100]]
+					: [[_('Configured network mode'), false]];
+		const modeCard = card(_('Network mode consistency'), E('div', {}, [
+			E('p', { 'style': 'margin:0 0 8px;' }, [_('Configured mode: '), E('strong', {}, modeLabel), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))]),
+			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;' }, modeChecks.map(([label, ok]) => E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [E('span', {}, label), statusPill(ok, _('Present'), _('Missing'))]))),
+			E('details', { 'style': 'margin-top:10px;' }, [
+				E('summary', { 'style': 'cursor:pointer;' }, _('Raw network details')),
+				E('h4', {}, _('nftables chains')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, nft.output || nft.error || _('No output')),
+				E('h4', {}, _('ip rule')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, rules.output || rules.error || _('No output')),
+				E('h4', {}, _('Routing table 100')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route100.output || route100.error || _('Empty')),
+				E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty')),
+				E('h4', {}, _('TUN interface')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, tunLink.output || tunLink.error || _('Not present'))
+			])
 		]));
 
 		const warningContent = warnings.length
 			? E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;' }, warnings.join('\n'))
 			: E('p', { 'class': 'cbi-section-descr' }, _('No parser or firewall warnings found in the current system log buffer.'));
-		const warningCard = card(_('Parser and firewall messages'), E('div', {}, [
+		const warningCard = card(_('Recent parser and firewall messages'), E('div', {}, [
 			E('p', { 'class': 'cbi-section-descr' }, _('Recent matching log lines are shown for troubleshooting. This is not a complete history; the system log buffer may rotate.')),
 			warningContent
 		]));
@@ -172,11 +295,11 @@ return view.extend({
 			E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;' }, [
 				E('h2', { 'style': 'margin:0;' }, _('Diagnostics')), refresh
 			]),
-			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output and active network state.')),
+			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode.')),
 			card(_('Overall status'), summary),
+			modeCard,
 			fakeCard,
 			groupedCard,
-			networkCard,
 			warningCard
 		]);
 	},

@@ -431,8 +431,8 @@ return view.extend({
             E('span', {}, 'ASClash v' + ASCLASH_VERSION),
             dot(),
             E('span', {}, [
-                'modify by ',
-                E('a', { 'href': 'https://github.com/Desonator', 'target': '_blank', 'rel': 'noopener' }, 'Desonator')
+                'Modified by ',
+                E('a', { 'href': 'https://github.com/Desonator/ASClash', 'target': '_blank', 'rel': 'noopener' }, 'Desonator')
             ]),
             dot(),
             E('span', {}, [
@@ -459,12 +459,8 @@ return view.extend({
                     'class': 'btn',
                     'click': toggleService,
                     'style': 'margin: 0;'
-                }, running ? _('Stop Service') : _('Start Service'))),
+                }, running ? _('Stop Service') : _('Start Service')))
 
-                E('span', {
-                    'class': 'label',
-                    'style': `padding: 4px 10px; border-radius: 3px; font-size: 12px; color: white; background-color: ${running ? '#5cb85c' : '#d9534f'}; margin: 0;`
-                }, running ? _('Clash is running') : _('Clash stopped'))
             ]),
             E('h2', _('Clash Configuration')),
             E('p', { 'class': 'cbi-section-descr' }, _('Your current Clash config. When applied, the changes will be saved and the service will be restarted.')),
