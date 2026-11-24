@@ -187,7 +187,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.7.1';
+const ASCLASH_VERSION = '4.8.2.1';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -196,14 +196,14 @@ const UPSTREAM_AUTHOR_URL  = 'https://zerolab.net';
 const UPSTREAM_DONATE_URL  = 'https://zerolab.net/donate/';
 
 function parseSemver(s) {
-    const m = (s || '').match(/v?(\d+)\.(\d+)\.(\d+)/);
-    return m ? [+m[1], +m[2], +m[3]] : null;
+    const m = (s || '').match(/v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?/);
+    return m ? [+m[1], +m[2], +m[3], +(m[4] || 0)] : null;
 }
 
 function cmpSemver(a, b) {
     const pa = parseSemver(a), pb = parseSemver(b);
     if (!pa || !pb) return 0;
-    for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+    for (let i = 0; i < 4; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
     return 0;
 }
 
