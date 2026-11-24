@@ -17,8 +17,158 @@ msgstr "设置"
 msgid "Rulesets"
 msgstr "规则集"
 
+msgid "Status"
+msgstr "状态"
+
 msgid "Log"
 msgstr "日志"
+
+msgid "Diagnostics"
+msgstr "诊断"
+
+msgid "Read-only overview of parser output and active network state."
+msgstr "解析器输出和当前网络状态的只读概览。"
+
+msgid "Refresh diagnostics"
+msgstr "刷新诊断"
+
+msgid "Overall status"
+msgstr "总体状态"
+
+msgid "Firewall table"
+msgstr "防火墙表"
+
+msgid "Present"
+msgstr "已存在"
+
+msgid "Missing / unreadable"
+msgstr "缺失或不可读取"
+
+msgid "Policy routing"
+msgstr "策略路由"
+
+msgid "Rules found"
+msgstr "已找到规则"
+
+msgid "Expected rules not found"
+msgstr "未找到预期规则"
+
+msgid "Rules and routes found"
+msgstr "已找到规则和路由"
+
+msgid "Expected rules or routes not found"
+msgstr "未找到预期规则或路由"
+
+msgid "Grouped parser"
+msgstr "Grouped AND 解析器"
+
+msgid "Generated batch available"
+msgstr "规则批次已生成"
+
+msgid "No generated batch"
+msgstr "未生成规则批次"
+
+msgid "Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s"
+msgstr "只读检查，不会重启服务或修改防火墙和路由状态。上次检查：%s"
+
+msgid "Fake-IP whitelist parser"
+msgstr "Fake-IP 白名单解析器"
+
+msgid "Generated entries: "
+msgstr "生成条目："
+
+msgid "Rule provider"
+msgstr "规则提供程序"
+
+msgid "No provider statistics available."
+msgstr "没有可用的提供程序统计信息。"
+
+msgid "Grouped AND rules"
+msgstr "分组 AND 规则"
+
+msgid "Matched conditions"
+msgstr "匹配条件"
+
+msgid "CIDR entries: "
+msgstr "CIDR 条目："
+
+msgid "Generation stats: "
+msgstr "生成器统计："
+
+msgid "Accepted by parser: "
+msgstr "解析器已接受："
+
+msgid "Skipped by parser: "
+msgstr "解析器已跳过："
+
+msgid "Skip reason"
+msgstr "跳过原因"
+
+msgid "Count"
+msgstr "数量"
+
+msgid "Example rule"
+msgstr "规则示例"
+
+msgid "Malformed rule or missing action"
+msgstr "规则格式错误或缺少动作"
+
+msgid "Missing action"
+msgstr "缺少动作"
+
+msgid "No supported IP-CIDR or RULE-SET operand"
+msgstr "没有受支持的 IP-CIDR 或 RULE-SET 操作数"
+
+msgid "Unsupported or multiple NETWORK conditions"
+msgstr "NETWORK 条件不受支持或存在多个条件"
+
+msgid "Missing or multiple DST-PORT conditions"
+msgstr "缺少 DST-PORT 条件或存在多个条件"
+
+msgid "Empty DST-PORT condition"
+msgstr "DST-PORT 条件为空"
+
+msgid "Ignored action: %s"
+msgstr "已忽略动作：%s"
+
+msgid "Generated CIDRs: "
+msgstr "已生成 CIDR："
+
+msgid "No grouped rules generated."
+msgstr "未生成分组规则。"
+
+msgid "Counts are per provider and generated set; overlapping addresses across different providers are intentionally not deduplicated."
+msgstr "按提供程序和生成的集合分别计数；不同提供程序之间的重叠地址不会去重。"
+
+msgid "Firewall and policy routing"
+msgstr "防火墙和策略路由"
+
+msgid "Firewall chains and policy routing"
+msgstr "防火墙链和策略路由"
+
+msgid "ip rule"
+msgstr "ip rule 规则"
+
+msgid "Routing table 100"
+msgstr "路由表 100"
+
+msgid "Routing table 101"
+msgstr "路由表 101"
+
+msgid "No output"
+msgstr "无输出"
+
+msgid "Empty"
+msgstr "空"
+
+msgid "Parser and firewall messages"
+msgstr "解析器和防火墙消息"
+
+msgid "Recent matching log lines are shown for troubleshooting. This is not a complete history; the system log buffer may rotate."
+msgstr "显示最近匹配的日志行以便排查问题。日志缓冲区可能轮转，因此这不是完整历史。"
+
+msgid "No parser or firewall warnings found in the current system log buffer."
+msgstr "当前系统日志缓冲区中未发现解析器或防火墙警告。"
 
 msgid "Please wait"
 msgstr "请稍候"
@@ -269,6 +419,66 @@ msgstr "其他接口"
 msgid "Mihomo Kernel Management"
 msgstr "Mihomo 内核管理"
 
+msgid "Smart group weights"
+msgstr "Smart 组权重"
+
+msgid "FAQ"
+msgstr "常见问题"
+
+msgid "No grouped rules found."
+msgstr "未找到已分组规则。"
+
+msgid "Shows unique nodes and their current Smart ranking and weights, grouped by Smart proxy group."
+msgstr "按 Smart 代理组显示去重后的节点、当前排名和权重。"
+
+msgid "Nodes are unique within each Smart group. Border and weight color: 0 is red, 50 yellow, 100 green."
+msgstr "每个 Smart 组内的节点会去重。边框和权重值颜色：0 为红色，50 为黄色，100 为绿色。"
+
+msgid "Refresh Smart weights"
+msgstr "刷新 Smart 权重"
+
+msgid "Could not read the configuration to detect Smart groups."
+msgstr "无法读取配置以检测 Smart 组。"
+
+msgid "Smart group is disabled in the configuration: no proxy group with type: smart was found."
+msgstr "配置中未启用 Smart 组：未找到 type: smart 的代理组。"
+
+msgid "Loading Smart weights..."
+msgstr "正在加载 Smart 权重..."
+
+msgid "Smart weights API request failed."
+msgstr "获取 Smart 权重 API 数据失败。"
+
+msgid "Smart weights API returned invalid JSON."
+msgstr "Smart 权重 API 返回了无效 JSON。"
+
+msgid "Smart group: %s"
+msgstr "Smart 组：%s"
+
+msgid "Could not load Smart weights: %s"
+msgstr "无法加载 Smart 组权重：%s"
+
+msgid "No Smart weight data is available for this group yet."
+msgstr "此 Smart 组暂时没有权重数据。"
+
+msgid "Smart API controller is not configured."
+msgstr "配置中未设置 Smart API 控制器地址。"
+
+msgid "Summary statistics were stale; total was recovered from the generated AUTO block."
+msgstr "摘要统计已过期；总数已从自动生成的 AUTO 区域重新计算。"
+
+msgid "IP-CIDR entries exist, but provider statistics are unavailable."
+msgstr "已找到 IP-CIDR 条目，但无法获取 provider 统计信息。"
+
+msgid "Server"
+msgstr "服务器"
+
+msgid "Rank"
+msgstr "排名"
+
+msgid "Weight"
+msgstr "权重"
+
 msgid "Download and manage the Mihomo (Clash Meta) kernel binary."
 msgstr "下载并管理 Mihomo（Clash Meta）内核二进制文件。"
 
@@ -313,6 +523,12 @@ msgstr "自动接口检测"
 
 msgid "Additional Settings"
 msgstr "其他设置"
+
+msgid "Show Smart group weights"
+msgstr "显示 Smart 组权重"
+
+msgid "The core must support proxy groups with type: smart. If unsupported, this widget will be hidden on the Status page."
+msgstr "核心必须支持 type: smart 代理组。如果不支持此功能，状态页面将隐藏此组件。"
 
 msgid "Exclude Mode (Universal approach)"
 msgstr "排除模式（通用方式）"
@@ -625,4 +841,106 @@ msgstr "捐赠"
 
 msgid "Support the author"
 msgstr "支持作者"
+
+msgid "Could not determine system architecture; falling back to amd64."
+msgstr "无法确定系统架构，将回退使用 amd64。"
+
+msgid "Invalid GitHub repository. Use owner/repository format."
+msgstr "GitHub 仓库格式无效，请使用 owner/repository 格式。"
+
+msgid "Downloading Mihomo kernel..."
+msgstr "正在下载 Mihomo 核心..."
+
+msgid "Download failed"
+msgstr "下载失败"
+
+msgid "Extraction failed"
+msgstr "解压失败"
+
+msgid "Failed to install new binary"
+msgstr "安装新二进制文件失败"
+
+msgid "Failed to set executable permissions"
+msgstr "设置可执行权限失败"
+
+msgid "Installed binary failed its version check"
+msgstr "已安装的二进制文件未通过版本检查"
+
+msgid "Kernel installed. The Clash service was stopped; restart it to activate the new version."
+msgstr "核心已安装。Clash 服务已停止，请重启服务以启用新版本。"
+
+msgid "Failed to check kernel status: %s"
+msgstr "检查核心状态失败：%s"
+
+msgid "Failed to check kernel status"
+msgstr "检查核心状态失败"
+
+msgid "Enter a GitHub repository as owner/repository."
+msgstr "请输入 owner/repository 格式的 GitHub 仓库。"
+
+msgid "Release source saved: %s"
+msgstr "已保存发布源：%s"
+
+msgid "Failed to save release source: %s"
+msgstr "保存发布源失败：%s"
+
+msgid "No compatible binary found for architecture %s in %s"
+msgstr "在 %s 中未找到适用于架构 %s 的兼容二进制文件"
+
+msgid "Official Mihomo"
+msgstr "官方 Mihomo"
+
+msgid "Custom GitHub release"
+msgstr "自定义 GitHub 发布源"
+
+msgid "Save release source"
+msgstr "保存发布源"
+
+msgid "Release source"
+msgstr "发布源"
+
+msgid "No compatible .gz binary found for architecture %s in %s"
+msgstr "在 %s 中未找到适用于架构 %s 的兼容 .gz 二进制文件"
+
+msgid "Loading..."
+msgstr "正在加载..."
+
+msgid "Provider"
+msgstr "提供商"
+
+msgid "CIDR entries"
+msgstr "CIDR 条目数"
+
+msgid "FIREWALL"
+msgstr "防火墙"
+
+msgid "IP-CIDR list without conditions"
+msgstr "无条件 IP-CIDR 列表"
+
+msgid "This list is used by the firewall (nftables/iptables) to mark traffic to the listed subnets when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "当 fake-ip-filter-mode 为“whitelist”或“rule”时，防火墙（nftables/iptables）使用此列表标记发往所列子网的流量。保存后立即生效，无需重启 Mihomo。"
+
+msgid "This block is generated automatically from IP-CIDR entries in providers referenced by non-DIRECT rules. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration or provider data changes."
+msgstr "此区域由非 DIRECT 规则引用的 provider 中的 IP-CIDR 条目自动生成。仅当配置或 provider 数据发生变化时，才会在服务启动及每次 clash-rules 更新（每 30 分钟）时刷新。"
+
+msgid "Total IP-CIDR entries"
+msgstr "IP-CIDR 条目总数"
+
+msgid "No data available."
+msgstr "暂无数据。"
+
+msgid "Network"
+msgstr "网络"
+
+msgid "Destination ports"
+msgstr "目标端口"
+
+msgid "IP-CIDR list with AND conditions"
+msgstr "带 AND 条件的 IP-CIDR 列表"
+
+msgid "This list is used by nftables to mark traffic to subnets matching the conditions when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "当 fake-ip-filter-mode 为“whitelist”或“rule”时，nftables 使用此列表标记符合条件的子网流量。保存后立即生效，无需重启 Mihomo。"
+
+msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
+msgstr "此区域由 AND 规则中的 IP-CIDR 条目生成，条目可直接指定，也可来自非 DIRECT 规则引用的 provider。条目载入独立的 nftables IPv4 集合；端口范围和传输协议会保留，不会展开为 IP/端口对。仅当配置、规则或 provider 数据发生变化时，才会在服务启动及每次 clash-rules 更新（每 30 分钟）时刷新。"
 

@@ -432,13 +432,15 @@ async function loadSettings() {
             autoDetectWan: true,
             blockQuic: true,
             useTmpfsRules: true,
+            showSmartWeights: true,
             detectedLan: '',
             detectedWan: '',
             includedInterfaces: [],
             excludedInterfaces: [],
             enableHwid: false,
             hwidUserAgent: 'SSClash',
-            hwidDeviceOS: 'OpenWrt'
+            hwidDeviceOS: 'OpenWrt',
+            mihomoReleaseRepo: 'MetaCubeX/mihomo'
         };
 
         content.split('\n').forEach(line => {
@@ -455,6 +457,7 @@ async function loadSettings() {
                 case 'AUTO_DETECT_WAN': settings.autoDetectWan = value === 'true'; break;
                 case 'BLOCK_QUIC': settings.blockQuic = value === 'true'; break;
                 case 'USE_TMPFS_RULES': settings.useTmpfsRules = value === 'true'; break;
+                case 'SHOW_SMART_WEIGHTS': settings.showSmartWeights = value !== 'false'; break;
                 case 'DETECTED_LAN': settings.detectedLan = value; break;
                 case 'DETECTED_WAN': settings.detectedWan = value; break;
                 case 'INCLUDED_INTERFACES':
@@ -472,6 +475,10 @@ async function loadSettings() {
                 case 'HWID_DEVICE_OS':
                     settings.hwidDeviceOS = value;
                     break;
+                case 'MIHOMO_RELEASE_REPO':
+                    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value))
+                        settings.mihomoReleaseRepo = value;
+                    break;
             }
         });
 
@@ -485,13 +492,15 @@ async function loadSettings() {
             autoDetectWan: true,
             blockQuic: true,
             useTmpfsRules: true,
+            showSmartWeights: true,
             detectedLan: '',
             detectedWan: '',
             includedInterfaces: [],
             excludedInterfaces: [],
             enableHwid: false,
             hwidUserAgent: 'SSClash',
-            hwidDeviceOS: 'OpenWrt'
+            hwidDeviceOS: 'OpenWrt',
+            mihomoReleaseRepo: 'MetaCubeX/mihomo'
         };
     }
 }
@@ -513,7 +522,7 @@ async function loadInterfacesByMode(mode) {
     }
 }
 
-async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, useTmpfsRules, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS) {
+async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, useTmpfsRules, showSmartWeights, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS, mihomoReleaseRepo) {
     try {
         let detectedLan = '';
         let detectedWan = '';
@@ -544,6 +553,7 @@ AUTO_DETECT_LAN=${autoDetectLan}
 AUTO_DETECT_WAN=${autoDetectWan}
 BLOCK_QUIC=${blockQuic}
 USE_TMPFS_RULES=${useTmpfsRules}
+SHOW_SMART_WEIGHTS=${showSmartWeights}
 DETECTED_LAN=${detectedLan}
 DETECTED_WAN=${detectedWan}
 INCLUDED_INTERFACES=${includedInterfaces.join(',')}
@@ -551,6 +561,7 @@ EXCLUDED_INTERFACES=${excludedInterfaces.join(',')}
 ENABLE_HWID=${enableHwid}
 HWID_USER_AGENT=${hwidUserAgent}
 HWID_DEVICE_OS=${hwidDeviceOS}
+MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
 `;
 
         await fs.write('/opt/clash/settings', settingsContent);
@@ -728,9 +739,17 @@ function getDownloadArch(arch) {
 // SECTION: Mihomo kernel management — version check, download
 // =============================================================================
 
-async function getLatestMihomoRelease() {
+const OFFICIAL_MIHOMO_REPO = 'MetaCubeX/mihomo';
+const DEFAULT_CUSTOM_MIHOMO_REPO = 'legiz-ru/Prizrak-Core';
+let activeMihomoReleaseRepo = OFFICIAL_MIHOMO_REPO;
+
+async function getLatestMihomoRelease(repo = activeMihomoReleaseRepo) {
     try {
-        const response = await fetch('https://api.github.com/repos/MetaCubeX/mihomo/releases/latest');
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo))
+            throw new Error(_('Invalid GitHub repository. Use owner/repository format.'));
+        const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+            headers: { 'Accept': 'application/vnd.github+json' }
+        });
         if (!response.ok) {
             throw new Error(_('HTTP %d: %s').format(response.status, response.statusText));
         }
@@ -738,17 +757,64 @@ async function getLatestMihomoRelease() {
         if (data.prerelease) {
             throw new Error(_('Latest release is a pre-release'));
         }
-        return { version: data.tag_name, assets: data.assets };
+        return { version: data.tag_name, assets: data.assets || [], repo };
     } catch (e) {
         console.error(_('Failed to get latest release:'), e);
         return null;
     }
 }
 
+function findMihomoReleaseAsset(release, arch) {
+    if (!release || !Array.isArray(release.assets)) return null;
+    const repo = (release.repo || OFFICIAL_MIHOMO_REPO).toLowerCase();
+    const version = release.version;
+    if (repo === OFFICIAL_MIHOMO_REPO.toLowerCase()) {
+        const name = `mihomo-linux-${arch}-${version}.gz`;
+        return release.assets.find(asset => asset.name === name) || null;
+    }
+
+    const archCandidates = {
+        'amd64-compatible': ['amd64-v1', 'amd64-compatible'],
+        amd64: ['amd64-v1', 'amd64-compatible'],
+        arm64: ['arm64'], armv7: ['armv7'], armv6: ['armv6'], armv5: ['armv5'],
+        'mips-softfloat': ['mips-softfloat'], 'mips-hardfloat': ['mips-hardfloat'],
+        'mipsle-softfloat': ['mipsle-softfloat'], 'mipsle-hardfloat': ['mipsle-hardfloat'],
+        mips64: ['mips64'], mips64le: ['mips64le'], riscv64: ['riscv64'], loong64: ['loong64']
+    }[arch] || [arch];
+    const ownerRepo = repo.split('/')[1].toLowerCase();
+
+    for (const candidateArch of archCandidates) {
+        const exactNames = [
+            `${ownerRepo}-linux-${candidateArch}-${version}.gz`,
+            `mihomo-linux-${candidateArch}-${version}.gz`
+        ];
+        const exact = release.assets.find(asset => exactNames.includes(asset.name));
+        if (exact) return exact;
+
+        // Support custom repositories that use a project-specific binary
+        // prefix, while requiring an exact Linux architecture/version suffix.
+        const suffix = `-linux-${candidateArch}-${version}.gz`;
+        const matches = release.assets.filter(asset =>
+            asset.name.endsWith(suffix) && !asset.name.toLowerCase().includes('compressed')
+        );
+        if (matches.length === 1) return matches[0];
+    }
+    return null;
+}
+
+async function persistMihomoReleaseRepo(repo) {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo))
+        throw new Error(_('Invalid GitHub repository. Use owner/repository format.'));
+    const current = await L.resolveDefault(fs.read('/opt/clash/settings'), '');
+    const lines = current.split(/\r?\n/).filter(line => !/^MIHOMO_RELEASE_REPO=/.test(line));
+    lines.push(`MIHOMO_RELEASE_REPO=${repo}`);
+    await fs.write('/opt/clash/settings', lines.filter((line, index, all) => line || index < all.length - 1).join('\n') + '\n');
+}
+
 function normalizeVersion(str) {
     if (!str) return '';
-    const match = str.match(/v?(\d+\.\d+\.\d+)/);
-    return match ? match[1] : str.trim();
+    const match = str.trim().match(/v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
+    return match ? match[1] : str.trim().replace(/^v/i, '');
 }
 
 async function getMihomoStatus() {
@@ -770,9 +836,9 @@ async function getMihomoStatus() {
 
             if (output && output.trim()) {
                 const patterns = [
-                    /Mihomo\s+Meta\s+(v[\d\.]+)/i,
-                    /Mihomo\s+[^v]*?(v[\d\.]+)/i,
-                    /(v\d+\.\d+\.\d+)/i
+                    /Mihomo\s+Meta\s+(v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/i,
+                    /Mihomo\s+[^v]*?(v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/i,
+                    /(v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/i
                 ];
 
                 for (const pattern of patterns) {
@@ -862,12 +928,57 @@ async function downloadMihomoKernel(downloadUrl, version, arch) {
 
 let updateKernelStatusFn = null;
 
-function createKernelDownloadSection() {
+function createKernelDownloadSection(releaseRepo = OFFICIAL_MIHOMO_REPO, onRepoSaved = null) {
     const container = E('div', { 'class': 'cbi-section' });
+    activeMihomoReleaseRepo = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(releaseRepo) ? releaseRepo : OFFICIAL_MIHOMO_REPO;
+    const uiLang = String((L.env && L.env.lang) || document.documentElement.lang || navigator.language || '').toLowerCase();
+    const isRussianUi = uiLang.startsWith('ru');
 
     container.appendChild(E('h2', _('Mihomo Kernel Management')));
     container.appendChild(E('div', { 'class': 'cbi-section-descr' },
         _('Download and manage the Mihomo (Clash Meta) kernel binary.')));
+
+    const sourceSelect = E('select', { 'class': 'cbi-input-select', 'style': 'min-width: 190px;' }, [
+        E('option', { 'value': 'official' }, isRussianUi ? 'Официальный Mihomo' : _('Official Mihomo')),
+        E('option', { 'value': 'custom' }, isRussianUi ? 'Свой релиз GitHub' : _('Custom GitHub release'))
+    ]);
+    const customRepoInput = E('input', {
+        'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'legiz-ru/Prizrak-Core',
+        'style': 'min-width: 230px;'
+    });
+    const saveSourceButton = E('button', { 'class': 'btn' }, isRussianUi ? 'Сохранить источник' : _('Save release source'));
+    const sourceIsOfficial = activeMihomoReleaseRepo.toLowerCase() === OFFICIAL_MIHOMO_REPO.toLowerCase();
+    sourceSelect.value = sourceIsOfficial ? 'official' : 'custom';
+    customRepoInput.value = sourceIsOfficial ? DEFAULT_CUSTOM_MIHOMO_REPO : activeMihomoReleaseRepo;
+    customRepoInput.style.display = sourceIsOfficial ? 'none' : '';
+    sourceSelect.addEventListener('change', () => {
+        customRepoInput.style.display = sourceSelect.value === 'custom' ? '' : 'none';
+    });
+    saveSourceButton.addEventListener('click', async () => {
+        const repo = sourceSelect.value === 'official' ? OFFICIAL_MIHOMO_REPO : customRepoInput.value.trim();
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+            ui.addNotification(null, E('p', isRussianUi ? 'Укажите GitHub-репозиторий в формате владелец/репозиторий.' : _('Enter a GitHub repository as owner/repository.')), 'error');
+            return;
+        }
+        saveSourceButton.disabled = true;
+        try {
+            await persistMihomoReleaseRepo(repo);
+            activeMihomoReleaseRepo = repo;
+            if (onRepoSaved) onRepoSaved(repo);
+            ui.addNotification(null, E('p', isRussianUi ? `Источник релизов сохранён: ${repo}` : _('Release source saved: %s').format(repo)), 'success');
+            if (updateKernelStatusFn) await updateKernelStatusFn();
+        } catch (e) {
+            ui.addNotification(null, E('p', isRussianUi ? `Не удалось сохранить источник релизов: ${e.message}` : _('Failed to save release source: %s').format(e.message)), 'error');
+        } finally {
+            saveSourceButton.disabled = false;
+        }
+    });
+    container.appendChild(E('div', { 'class': 'cbi-value', 'style': 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0;' }, [
+        E('label', { 'class': 'cbi-value-title', 'style': 'width: auto;' }, isRussianUi ? 'Источник релизов' : _('Release source')),
+        sourceSelect,
+        customRepoInput,
+        saveSourceButton
+    ]));
 
     const statusContainer = E('div', {
         'id': 'kernel-status',
@@ -888,7 +999,7 @@ function createKernelDownloadSection() {
             const [status, arch, release] = await Promise.all([
                 getMihomoStatus(),
                 detectSystemArchitecture(),
-                getLatestMihomoRelease()
+                getLatestMihomoRelease(activeMihomoReleaseRepo)
             ]);
 
             let statusHTML = '';
@@ -905,7 +1016,7 @@ function createKernelDownloadSection() {
             if (release) {
                 if (downloadButton) downloadButton.disabled = false;
 
-                statusHTML += `<div style="margin-top: 5px;">🚀 ${_('Latest Available')}: ${release.version}</div>`;
+                statusHTML += `<div style="margin-top: 5px;">🚀 ${_('Latest Available')}: ${release.version} (${release.repo})</div>`;
 
                 const localVer = normalizeVersion(status.version);
                 const latestVer = normalizeVersion(release.version);
@@ -1403,7 +1514,7 @@ function createInterfaceSelector(interfaces, selectedInterfaces, currentMode) {
     return container;
 }
 
-function createAdditionalSettings(blockQuic, useTmpfsRules, enableHwid, hwidUserAgent, hwidDeviceOS) {
+function createAdditionalSettings(blockQuic, useTmpfsRules, showSmartWeights, enableHwid, hwidUserAgent, hwidDeviceOS) {
     const container = E('div', { 'class': 'cbi-section' });
 
     container.appendChild(E('h3', _('Additional Settings')));
@@ -1454,9 +1565,27 @@ function createAdditionalSettings(blockQuic, useTmpfsRules, enableHwid, hwidUser
 
     settingsContainer.appendChild(tmpfsLabel);
 
+    const smartWeightsCheckbox = E('input', {
+        'type': 'checkbox',
+        'id': 'show_smart_weights'
+    });
+    const smartWeightsLabel = E('label', {
+        'for': 'show_smart_weights',
+        'style': cardStyle
+    }, [
+        E('span', { 'style': cardHeaderStyle }, [
+            smartWeightsCheckbox,
+            E('span', '📊 ' + _('Show Smart group weights'))
+        ]),
+        E('span', { 'style': cardDescStyle },
+            _('The core must support proxy groups with type: smart. If unsupported, this widget will be hidden on the Status page.'))
+    ]);
+    settingsContainer.appendChild(smartWeightsLabel);
+
     setTimeout(() => {
         blockQuicCheckbox.checked = blockQuic;
         tmpfsCheckbox.checked = useTmpfsRules;
+        smartWeightsCheckbox.checked = showSmartWeights;
     }, 0);
 
     const hwidCheckbox = E('input', {
@@ -1683,11 +1812,12 @@ return view.extend({
         const additionalSettings = createAdditionalSettings(
             settings.blockQuic,
             settings.useTmpfsRules,
+            settings.showSmartWeights,
             settings.enableHwid,
             settings.hwidUserAgent,
             settings.hwidDeviceOS
         );
-        const kernelDownloadSection = createKernelDownloadSection();
+        // Kernel management is rendered on the Status page.
 
         const downloadButton = E('button', {
             'id': 'download-kernel-btn',
@@ -1699,14 +1829,13 @@ return view.extend({
                 try {
                     const arch = await detectSystemArchitecture();
                     const downloadArch = getDownloadArch(arch);
-                    const release = await getLatestMihomoRelease();
+                    const release = await getLatestMihomoRelease(activeMihomoReleaseRepo);
 
                     if (!release) throw new Error(_('Failed to get release information'));
 
-                    const assetName = `mihomo-linux-${downloadArch}-${release.version}.gz`;
-                    const asset = release.assets.find(a => a.name === assetName);
+                    const asset = findMihomoReleaseAsset(release, downloadArch);
 
-                    if (!asset) throw new Error(_('No binary found for architecture: %s').format(downloadArch));
+                    if (!asset) throw new Error(_('No compatible .gz binary found for architecture %s in %s').format(downloadArch, release.repo));
 
                     const success = await downloadMihomoKernel(asset.browser_download_url, release.version, downloadArch);
 
@@ -1787,6 +1916,7 @@ return view.extend({
                 const autoDetectWan = autoDetectOptions.querySelector('#auto_detect_wan').checked;
                 const blockQuic = additionalSettings.querySelector('#block_quic').checked;
                 const useTmpfsRules = additionalSettings.querySelector('#use_tmpfs_rules')?.checked ?? true;
+                const showSmartWeights = additionalSettings.querySelector('#show_smart_weights')?.checked ?? true;
                 const enableHwid = additionalSettings.querySelector('#enable_hwid')?.checked || false;
                 const hwidUserAgent = additionalSettings.querySelector('#hwid_user_agent')?.value || 'SSClash';
                 const hwidDeviceOS = additionalSettings.querySelector('#hwid_device_os')?.value || 'OpenWrt';
@@ -1805,10 +1935,12 @@ return view.extend({
                     autoDetectWan,
                     blockQuic,
                     useTmpfsRules,
+                    showSmartWeights,
                     selected,
                     enableHwid,
                     hwidUserAgent,
-                    hwidDeviceOS
+                    hwidDeviceOS,
+                    settings.mihomoReleaseRepo
                 );
 
                 if (success) {
@@ -2043,10 +2175,7 @@ return view.extend({
             interfaceSelector,
             additionalSettings,
             buttonContainer,
-            statusSection,
-            kernelDownloadSection,
-            kernelButtonContainer,
-            kernelInfoSection
+            statusSection
         ]);
 
         return view;

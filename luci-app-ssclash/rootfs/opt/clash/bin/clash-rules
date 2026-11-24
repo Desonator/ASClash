@@ -20,6 +20,9 @@ readonly DOMAIN_RESOLVE_TIMEOUT=2
 readonly RESERVED_NETWORKS="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 255.255.255.255/32"
 # Fake-ip whitelist IP-CIDR technical list (used only by the firewall, not by config.yaml)
 readonly FAKEIP_WHITELIST_FILE="/opt/clash/lst/fakeip-whitelist-ipcidr.txt"
+readonly FAKEIP_WHITELIST_SUMMARY_FILE="/opt/clash/lst/fakeip-whitelist-summary.txt"
+readonly GROUPED_FAKEIP_SUMMARY_FILE="/opt/clash/lst/fakeip-port-summary.txt"
+readonly GROUPED_FAKEIP_DIAGNOSTICS_FILE="/tmp/clash/fakeip_port_parser_diagnostics.txt"
 readonly FAKEIP_IPSET_NAME="clash_fakeip_whitelist"
 # RAM-only: last CIDR list digest applied to nft/ipset (skip kernel churn when unchanged).
 readonly FAKEIP_WHITELIST_DIGEST_FILE="/tmp/clash/fakeip_whitelist_applied.digest"
@@ -43,10 +46,60 @@ FAKEIP_WHITELIST_IPS=""
 # rule-providers that are referenced by rules with a non-DIRECT action. Set to
 # "false" in /opt/clash/settings to disable and manage the file entirely by hand.
 AUTO_FAKEIP_WHITELIST="true"
+# Experimental grouped provider/port nft rules. Keep disabled until the
+# generated batch has been inspected on the target OpenWrt device.
+GROUPED_FAKEIP_PORT_RULES_ENABLED="true"
+# When true, generate the grouped nft batch but do not apply it.
+GROUPED_FAKEIP_PORT_RULES_DRY_RUN="false"
+GROUPED_FAKEIP_MAX_GROUPS="32"
+GROUPED_FAKEIP_MAX_CIDRS="150000"
+readonly GROUPED_FAKEIP_DIGEST_FILE="/tmp/clash/fakeip_port_groups.digest"
+readonly GROUPED_FAKEIP_STATS_FILE="/tmp/clash/fakeip_port_groups.stats"
+readonly GROUPED_FAKEIP_BATCH_DIGEST_FILE="/tmp/clash/fakeip_port_groups.nft.digest"
+readonly GROUPED_FAKEIP_BATCH_CHECKSUM_FILE="/tmp/clash/fakeip_port_groups.nft.md5"
+readonly CLASH_RULES_UPDATE_LOCK="/tmp/clash/clash-rules-update.lock"
 # Markers delimit the auto-generated block inside the fakeip whitelist file.
 # Everything outside the markers is preserved on each refresh.
 readonly FAKEIP_AUTO_BEGIN="# AUTO-BEGIN: generated from rule-providers — do not edit between markers"
 readonly FAKEIP_AUTO_END="# AUTO-END"
+
+# During firewall/policy setup, remember failures even when an individual
+# helper runs in a pipeline subshell or historically ignored a command status.
+NFT_FAILURE_TRACKER=""
+IPTABLES_FAILURE_TRACKER=""
+IPSET_FAILURE_TRACKER=""
+nft() {
+    command nft "$@"
+    local rc=$?
+    if [ "$rc" -ne 0 ] && [ -n "$NFT_FAILURE_TRACKER" ]; then
+        case "$1" in
+            add|insert|flush|replace|create|destroy|-f|-c) : > "$NFT_FAILURE_TRACKER" ;;
+        esac
+    fi
+    return "$rc"
+}
+
+iptables() {
+    command iptables "$@"
+    local rc=$?
+    if [ "$rc" -ne 0 ] && [ -n "$IPTABLES_FAILURE_TRACKER" ]; then
+        case " $* " in
+            *" -N "*|*" -A "*|*" -I "*|*" -F "*|*" -X "*|*" -D "*) : > "$IPTABLES_FAILURE_TRACKER" ;;
+        esac
+    fi
+    return "$rc"
+}
+
+ipset() {
+    command ipset "$@"
+    local rc=$?
+    if [ "$rc" -ne 0 ] && [ -n "$IPSET_FAILURE_TRACKER" ]; then
+        case "$1" in
+            create|flush|add|restore) : > "$IPSET_FAILURE_TRACKER" ;;
+        esac
+    fi
+    return "$rc"
+}
 
 # Helper: returns 0 if the current fake-ip-filter-mode is one of the modes that
 # leaves part of the traffic on real IPs (whitelist or rule). In both cases
@@ -54,6 +107,21 @@ readonly FAKEIP_AUTO_END="# AUTO-END"
 # mark traffic to specific real IPs for proxying.
 is_ipcidr_whitelist_mode() {
     [ "$FAKE_IP_FILTER_MODE" = "whitelist" ] || [ "$FAKE_IP_FILTER_MODE" = "rule" ]
+}
+
+acquire_update_lock() {
+    mkdir -p /tmp/clash
+    if ! mkdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null; then
+        msg "Update already running, skipping concurrent invocation"
+        return 1
+    fi
+    trap 'rmdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null' EXIT INT TERM
+    return 0
+}
+
+release_update_lock() {
+    rmdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null
+    trap - EXIT INT TERM
 }
 
 # Unified marks / policy routing tables
@@ -64,6 +132,8 @@ TABLE_TPROXY="100"
 TABLE_TUN_UDP="101"
 PREF_TPROXY="1000"
 PREF_TUN_UDP="1001"
+# Tables 100/101 and rule priorities 1000/1001 are reserved for SSClash.
+# Keep these IDs unique if adding another policy-routing service to the router.
 
 # Flag files: if present on stop(), bridge-nf-call values are restored to 1.
 BRIDGE_NF_CALL_FLAG="/tmp/clash/bridge_nf_call_iptables_flag"
@@ -105,6 +175,10 @@ load_all_settings_once() {
             "INCLUDED_INTERFACES") INCLUDED_INTERFACES="$value" ;;
             "EXCLUDED_INTERFACES") EXCLUDED_INTERFACES="$value" ;;
             "AUTO_FAKEIP_WHITELIST") AUTO_FAKEIP_WHITELIST="$value" ;;
+            "GROUPED_FAKEIP_PORT_RULES_ENABLED") GROUPED_FAKEIP_PORT_RULES_ENABLED="$value" ;;
+            "GROUPED_FAKEIP_PORT_RULES_DRY_RUN") GROUPED_FAKEIP_PORT_RULES_DRY_RUN="$value" ;;
+            "GROUPED_FAKEIP_MAX_GROUPS") GROUPED_FAKEIP_MAX_GROUPS="$value" ;;
+            "GROUPED_FAKEIP_MAX_CIDRS") GROUPED_FAKEIP_MAX_CIDRS="$value" ;;
         esac
     done < "$SETTINGS_FILE"
 
@@ -378,7 +452,14 @@ resolve_domain() {
     # (e.g. PPPoE up but upstream DNS not yet reachable) can never block the
     # init sequence (uhttpd / LuCI) the way an unbounded lookup could.
     if command -v nslookup >/dev/null 2>&1; then
-        resolved_ips=$(run_with_timeout "$DOMAIN_RESOLVE_TIMEOUT" nslookup "$domain" | awk '/^Address: / { print $2 }' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+        resolved_ips=$(run_with_timeout "$DOMAIN_RESOLVE_TIMEOUT" nslookup "$domain" | awk '
+            /^Address([[:space:]]+[0-9]+)?:[[:space:]]+/ {
+                value = $0
+                sub(/^Address([[:space:]]+[0-9]+)?:[[:space:]]+/, "", value)
+                split(value, fields, /[[:space:]]+/)
+                if (fields[1] != "") print fields[1]
+            }
+        ' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
     fi
 
     # If nslookup failed or not available, try using getent
@@ -601,6 +682,13 @@ cache_subscription_ips() {
     local providers_info=$(extract_proxy_providers)
     if [ -z "$providers_info" ]; then
         msg "No proxy-providers found, skipping subscription cache"
+        mkdir -p "$(dirname "$SUBSCRIPTION_CACHE_FILE")"
+        local empty_cache="${SUBSCRIPTION_CACHE_FILE}.tmp.$$"
+        : > "$empty_cache" && mv -f "$empty_cache" "$SUBSCRIPTION_CACHE_FILE" || {
+            rm -f "$empty_cache"
+            msg "ERROR: Failed to clear stale subscription IP cache"
+            return 1
+        }
         return 0
     fi
 
@@ -755,6 +843,31 @@ extract_rule_providers() {
     ' "$CONFIG_FILE"
 }
 
+# Return success only after every configured rule-provider file is present and
+# non-empty. The init script uses this after procd starts Mihomo, because the
+# firewall's first pass necessarily runs before HTTP providers are downloaded.
+rule_provider_files_ready() {
+    [ -f "$CONFIG_FILE" ] || return 1
+    local providers base_dir provider behavior type path full_path
+    providers=$(extract_rule_providers)
+    [ -n "$providers" ] || return 0
+    base_dir=$(get_providers_base_dir)
+
+    while IFS='|' read -r provider behavior type path; do
+        [ -n "$provider" ] || continue
+        [ -n "$path" ] || return 1
+        case "$path" in
+            ./*) full_path="$base_dir/${path#./}" ;;
+            /*) full_path="$path" ;;
+            *) full_path="$base_dir/$path" ;;
+        esac
+        [ -s "$full_path" ] || return 1
+    done <<EOF
+$providers
+EOF
+    return 0
+}
+
 # Parse the rules: section and return the names of rule-sets that are referenced
 # by at least one rule whose action is NOT DIRECT/REJECT/REJECT-DROP/PASS.
 # These are the rule-sets whose IP-CIDR entries should be proxied, and therefore
@@ -812,6 +925,670 @@ extract_proxy_rule_set_names() {
         }
     }
     ' "$CONFIG_FILE" | sort -u
+}
+
+# Extract literal IPv4 IP-CIDR matchers from top-level routing rules whose
+# final action is not DIRECT/REJECT/PASS. These destinations must still reach
+# Mihomo when DNS returned a real IP (notably fake-ip-filter-mode: rule).
+extract_proxy_ip_cidr_rules() {
+    [ -f "$CONFIG_FILE" ] || return 0
+
+    awk '
+    function trim(s) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+        gsub(/^\047|\047$/, "", s)
+        gsub(/^\"|\"$/, "", s)
+        return s
+    }
+    /^rules:[[:space:]]*$/ { in_rules = 1; next }
+    /^[^[:space:]][^:]*:/ { if (in_rules) in_rules = 0; next }
+    !in_rules { next }
+    {
+        line = $0
+        sub(/#.*/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line !~ /^-[[:space:]]*IP-CIDR,/) next
+        sub(/^-[[:space:]]*IP-CIDR,/, "", line)
+        n = split(line, parts, ",")
+        if (n < 3) next
+        cidr = trim(parts[1])
+        action = toupper(trim(parts[2]))
+        if (cidr == "" || action == "DIRECT" || action == "REJECT" || action == "REJECT-DROP" || action == "PASS") next
+        print cidr
+    }
+    ' "$CONFIG_FILE" | while IFS= read -r cidr; do
+        [ -n "$cidr" ] && is_valid_ipv4_cidr "$cidr" && printf '%s\n' "$cidr"
+    done | sort -u
+}
+
+# Parse complex AND rules that combine RULE-SET and/or direct IP-CIDR with
+# NETWORK and exactly one DST-PORT expression.
+# Output format:
+#   operand-spec|network|ports|action
+# where operand-spec contains semicolon-separated RULE-SET:name/IP-CIDR:CIDR
+# operands which must all match.
+#
+# This is intentionally separate from extract_proxy_rule_set_names().  The
+# latter feeds AUTO_FAKEIP_WHITELIST and must continue returning only provider
+# names. This parser supplies input to the grouped nftables implementation.
+extract_grouped_port_rules() {
+    [ -f "$CONFIG_FILE" ] || return 1
+    mkdir -p /tmp/clash
+    : > "$GROUPED_FAKEIP_DIAGNOSTICS_FILE"
+
+    awk -v diagnostics="$GROUPED_FAKEIP_DIAGNOSTICS_FILE" '
+    function trim(s) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+        return s
+    }
+
+    function note(reason, source) {
+        skipped[reason]++
+        if (samples[reason] == "") samples[reason] = substr(source, 1, 180)
+    }
+
+    /^rules:[[:space:]]*$/ { in_rules = 1; next }
+    /^[^[:space:]][^:]*:/ { if (in_rules) in_rules = 0; next }
+    !in_rules { next }
+
+    {
+        line = $0
+        sub(/#.*/, "", line)
+        line = trim(line)
+        if (line !~ /^-[[:space:]]*AND,/) next
+
+        sub(/^-[[:space:]]*/, "", line)
+        if (!match(line, /,[^,()]+$/)) { note("malformed-rule-or-missing-action", line); next }
+        action = trim(substr(line, RSTART + 1, RLENGTH - 1))
+        if (action == "") { note("missing-action", line); next }
+        action_check = toupper(action)
+        gsub(/["\047[:space:]]/, "", action_check)
+        if (action_check == "DIRECT" || action_check == "REJECT" || action_check == "REJECT-DROP") {
+            note("excluded-action-" action_check, line)
+            next
+        }
+
+        # Collect the CIDR operands of this AND rule. Multiple operands are
+        # intersected later; treating them as separate groups would turn AND
+        # into OR and mark addresses that do not satisfy the full rule.
+        rest = line
+        operand_count = 0
+        operand_spec = ""
+        while (match(rest, /RULE-SET,[^,()]+/)) {
+            token = substr(rest, RSTART, RLENGTH)
+            sub(/^RULE-SET,/, "", token)
+            token = trim(token)
+            if (token != "") {
+                operand_spec = operand_spec (operand_count++ ? ";" : "") "RULE-SET:" token
+            }
+            rest = substr(rest, RSTART + RLENGTH)
+        }
+        rest = line
+        while (match(rest, /IP-CIDR,[^,()[:space:]]+/)) {
+            token = substr(rest, RSTART + 8, RLENGTH - 8)
+            token = trim(token)
+            if (token != "") {
+                operand_spec = operand_spec (operand_count++ ? ";" : "") "IP-CIDR:" token
+            }
+            rest = substr(rest, RSTART + RLENGTH)
+        }
+        if (operand_count == 0) { note("no-supported-ip-cidr-operand", line); next }
+
+        network = "*"
+        network_count = 0
+        network_rest = line
+        while (match(network_rest, /NETWORK,[A-Za-z0-9_-]+/)) {
+            network_count++
+            if (network_count == 1) {
+                network = substr(network_rest, RSTART + 8, RLENGTH - 8)
+                network = tolower(network)
+            }
+            network_rest = substr(network_rest, RSTART + RLENGTH)
+        }
+        if (network_count > 1 || (network != "*" && network != "tcp" && network != "udp")) {
+            note("unsupported-or-multiple-network", line)
+            next
+        }
+
+        port_rest = line
+        port_count = 0
+        while (match(port_rest, /DST-PORT,[0-9,-]+/)) {
+            port_count++
+            if (port_count == 1) ports = substr(port_rest, RSTART + 9, RLENGTH - 9)
+            port_rest = substr(port_rest, RSTART + RLENGTH)
+        }
+        if (port_count != 1) { note("missing-or-multiple-dst-port", line); next }
+        if (ports == "") { note("empty-dst-port", line); next }
+
+        accepted++
+        print operand_spec "|" network "|" ports "|" action
+    }
+    END {
+        print "accepted|" (accepted + 0) > diagnostics
+        for (reason in skipped)
+            print "skipped|" reason "|" skipped[reason] "|" samples[reason] > diagnostics
+        close(diagnostics)
+    }
+    ' "$CONFIG_FILE"
+}
+
+# Remove all generated grouped-rule state. This is used when there are no
+# eligible sources or generation exceeds its safety limits, so an older batch
+# can never be mistaken for the current configuration.
+clear_grouped_port_artifacts() {
+    rm -f /tmp/clash/fakeip_port_groups \
+        /tmp/clash/fakeip_port_groups.nft \
+        /tmp/clash/fakeip_port_groups.nft.tmp.* \
+        /tmp/clash/fakeip_port_groups.digest \
+        /tmp/clash/fakeip_port_groups.stats \
+        /tmp/clash/fakeip_port_groups.nft.digest \
+        /tmp/clash/fakeip_port_groups.nft.md5 \
+        /tmp/clash/fakeip_port_rules_summary \
+        /tmp/clash/fakeip_port_provider_sources \
+        /tmp/clash/fakeip_port_ui_rows \
+        /tmp/clash/fakeip_port_groups.normalized \
+        /tmp/clash/fakeip_port_group_*.cidr \
+        /tmp/clash/fakeip_port_provider_ui_map \
+        /tmp/clash/fakeip_port_provider_ui_counts \
+        /tmp/clash/fakeip_provider_ui_*.cidr \
+        /tmp/clash/fakeip_provider_*.cidr
+    mkdir -p "$(dirname "$GROUPED_FAKEIP_SUMMARY_FILE")" 2>/dev/null
+    : > "$GROUPED_FAKEIP_SUMMARY_FILE"
+}
+
+# Build grouped CIDR sources for complex port rules. This stage deliberately
+# does not touch nftables: it collects CIDRs per condition, then coalesces
+# byte-identical sets shared by different network/port rules. Exact CIDRs
+# already present in the ordinary AUTO_FAKEIP_WHITELIST output are removed.
+generate_grouped_port_sources() {
+    # Do not parse large provider files unless the grouped feature is enabled.
+    # The previous implementation generated diagnostic files even while the
+    # feature was disabled, causing unnecessary CPU/RAM pressure on routers.
+    [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ] || return 0
+    rm -f /tmp/clash/fakeip_port_rules_summary
+    [ -f "$CONFIG_FILE" ] || return 1
+    mkdir -p /tmp/clash
+
+    local rules providers base_dir auto_file metadata rule provider network ports action ui_summary source_map ui_rows provider_ui_map provider_ui_counts
+    rules="$(extract_grouped_port_rules)"
+    providers="$(extract_rule_providers)"
+    local rule_set_names classical_candidates
+    rule_set_names=$(extract_proxy_rule_set_names)
+    classical_candidates=$(printf '%s\n%s\n' "$rule_set_names" "$(printf '%s\n' "$rules" | awk -F'|' 'NF >= 4 { n=split($1,a,";"); for(i=1;i<=n;i++) if(a[i] ~ /^RULE-SET:/) {sub(/^RULE-SET:/,"",a[i]); print a[i]} }')" | grep -v '^$' | sort -u)
+    if [ -z "$rules$classical_candidates" ]; then
+        clear_grouped_port_artifacts
+        return 0
+    fi
+    base_dir="$(get_providers_base_dir)"
+    local digest_input grouped_digest saved_digest
+    digest_input=$(printf 'generator=4\n%s\n%s\n%s\nlimits=%s|%s\n' \
+        "$CONFIG_FILE" "$rules" "$classical_candidates" \
+        "$GROUPED_FAKEIP_MAX_GROUPS" "$GROUPED_FAKEIP_MAX_CIDRS")
+    while IFS='|' read -r _provider _behavior _type _path; do
+        case "$_path" in
+            ./*) _full="$base_dir/${_path#./}" ;;
+            /*) _full="$_path" ;;
+            *) _full="$base_dir/$_path" ;;
+        esac
+        [ -f "$_full" ] && digest_input="$digest_input\n$_provider|$_behavior|$_type|$_path|$_full:$(md5sum "$_full" 2>/dev/null | awk '{print $1}')"
+    done <<EOF
+$providers
+EOF
+    grouped_digest=$(printf '%b\n' "$digest_input" | md5sum | awk '{print $1}')
+    saved_digest=""
+    [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && saved_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+    if [ -n "$saved_digest" ] && [ "$grouped_digest" = "$saved_digest" ] \
+       && [ -s /tmp/clash/fakeip_port_groups ] \
+       && [ -s /tmp/clash/fakeip_port_groups.nft ] \
+       && [ -s "$GROUPED_FAKEIP_STATS_FILE" ] \
+       && [ -s "$GROUPED_FAKEIP_SUMMARY_FILE" ]; then
+        msg "Grouped fakeip sources unchanged, skipping regeneration"
+        return 0
+    fi
+    auto_file="/tmp/clash/fakeip_auto_entries.$$"
+    metadata="/tmp/clash/fakeip_port_groups"
+    summary="/tmp/clash/fakeip_port_rules_summary"
+    ui_summary="$GROUPED_FAKEIP_SUMMARY_FILE"
+    source_map="/tmp/clash/fakeip_port_provider_sources"
+    ui_rows="/tmp/clash/fakeip_port_ui_rows"
+    provider_ui_map="/tmp/clash/fakeip_port_provider_ui_map"
+    provider_ui_counts="/tmp/clash/fakeip_port_provider_ui_counts"
+    # Group files are regenerated from scratch.  Without this cleanup each
+    # restart appends the same CIDRs again and the nft batch grows endlessly.
+    rm -f /tmp/clash/fakeip_port_group_*.cidr
+    rm -f /tmp/clash/fakeip_provider_*.cidr
+    : > "$auto_file"
+    : > "$metadata"
+    : > "$source_map"
+    : > "$ui_rows"
+    : > "$provider_ui_map"
+    : > "$provider_ui_counts"
+    rm -f /tmp/clash/fakeip_provider_ui_*.cidr
+    printf '%s\n' "$rules" | sort -u > "$summary"
+    mkdir -p "$(dirname "$ui_summary")"
+    : > "$ui_summary"
+
+    # Read only the generated AUTO block, not manual entries.
+    if [ -f "$FAKEIP_WHITELIST_FILE" ]; then
+        awk '
+            /^#[[:space:]]*AUTO-BEGIN/ { in_auto=1; next }
+            /^#[[:space:]]*AUTO-END/ { in_auto=0; next }
+            in_auto && $0 !~ /^#/ && NF { print }
+        ' "$FAKEIP_WHITELIST_FILE" > "$auto_file"
+    fi
+
+    # Scan referenced classical providers for embedded AND/IP-CIDR payload
+    # rules. Their own NETWORK/DST-PORT conditions define the grouped target;
+    # they are not assigned the ports from the outer RULE-SET rule.
+    local nested_source nested_filtered nested_counts provider_line behavior path full_path nested_key nested_group provider_ui_key provider_ui_file
+    for provider in $classical_candidates; do
+        provider_line=$(printf '%s\n' "$providers" | awk -F'|' -v n="$provider" '$1 == n { print; exit }')
+        [ -n "$provider_line" ] || continue
+        behavior=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $2}')
+        [ "$behavior" = "classical" ] || continue
+        path=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $4}')
+        case "$path" in
+            ./*) full_path="$base_dir/${path#./}" ;;
+            /*) full_path="$path" ;;
+            *) full_path="$base_dir/$path" ;;
+        esac
+        [ -f "$full_path" ] || continue
+        provider_cache_key=$(printf '%s|%s|%s' "$provider" "$behavior" "$full_path" | md5sum 2>/dev/null | awk '{print $1}')
+        nested_source="/tmp/clash/fakeip_nested_${provider_cache_key}.txt"
+        nested_filtered="${nested_source}.filtered"
+        nested_counts="${nested_source}.counts"
+        extract_classical_and_ipcidr_entries "$full_path" | filter_valid_provider_entries > "$nested_source"
+        [ -s "$nested_source" ] || { rm -f "$nested_source" "$nested_filtered" "$nested_counts"; continue; }
+        provider_ui_key=$(printf '%s' "$provider" | md5sum 2>/dev/null | awk '{print $1}')
+        provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}_nested.cidr"
+        printf '%s|%s|nested\n' "$provider" "$provider_ui_key" >> "$provider_ui_map"
+        awk -F'|' '{ if ($1 != "") print $1 }' "$nested_source" >> "$provider_ui_file"
+
+        awk -F'|' -v auto="$auto_file" '
+            BEGIN { while ((getline x < auto) > 0) covered[x]=1; close(auto) }
+            NF >= 3 && !covered[$1] { print }
+        ' "$nested_source" > "$nested_filtered"
+        [ -s "$nested_filtered" ] || { rm -f "$nested_source" "$nested_filtered" "$nested_counts"; continue; }
+        sort -u "$nested_filtered" -o "$nested_filtered"
+
+        while IFS='|' read -r nested_cidr nested_network nested_ports; do
+            [ -n "$nested_cidr" ] || continue
+            nested_key=$(printf '%s_%s' "$nested_network" "$nested_ports" | md5sum 2>/dev/null | awk '{print $1}')
+            nested_group="/tmp/clash/fakeip_port_group_${nested_key}.cidr"
+            printf '%s\n' "$nested_cidr" >> "$nested_group"
+            printf '%s|%s|%s|proxy\n' "$nested_key" "$nested_network" "$nested_ports" >> "$metadata"
+            printf '%s|%s\n' "$nested_key" "$provider" >> "$source_map"
+        done < "$nested_filtered"
+
+        awk -F'|' '{ k=$2 FS $3; n[k]++ } END { for (k in n) print k FS n[k] }' "$nested_filtered" > "$nested_counts"
+        while IFS='|' read -r nested_network nested_ports nested_count; do
+            printf '%s|%s|%s|classical-payload\n' "$provider" "$nested_network" "$nested_ports" >> "$summary"
+        done < "$nested_counts"
+        rm -f "$nested_source" "$nested_filtered" "$nested_counts"
+    done
+
+    echo "$rules" | while IFS='|' read -r operand_spec network ports action; do
+        [ -n "$operand_spec" ] || continue
+        action_upper=$(printf '%s' "$action" | awk '{ gsub(/["\047[:space:]]/, ""); print toupper($0) }')
+        case "$action_upper" in
+            DIRECT|REJECT|REJECT-DROP) continue ;;
+            *) action_kind="proxy" ;;
+        esac
+
+        rule_hash=$(printf '%s|%s|%s|%s' "$operand_spec" "$network" "$ports" "$action_kind" | md5sum 2>/dev/null | awk '{print $1}')
+        rule_work="/tmp/clash/fakeip_rule_${rule_hash}"
+        rule_result="${rule_work}.cidr"
+        rm -f "${rule_work}.operand."* "$rule_result"
+        operand_index=0
+        missing_operand=false
+        provider_labels=""
+
+        while IFS= read -r operand; do
+            [ -n "$operand" ] || continue
+            operand_type="${operand%%:*}"
+            operand_value="${operand#*:}"
+            [ -n "$operand_value" ] || { missing_operand=true; break; }
+            operand_file="${rule_work}.operand.${operand_index}"
+            case "$operand_type" in
+                RULE-SET)
+                    provider="$operand_value"
+                    provider_line=$(printf '%s\n' "$providers" | awk -F'|' -v n="$provider" '$1 == n { print; exit }')
+                    [ -n "$provider_line" ] || { missing_operand=true; break; }
+                    behavior=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $2}')
+                    path=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $4}')
+                    case "$path" in
+                        ./*) full_path="$base_dir/${path#./}" ;;
+                        /*) full_path="$path" ;;
+                        *) full_path="$base_dir/$path" ;;
+                    esac
+                    [ -s "$full_path" ] || { missing_operand=true; break; }
+                    provider_cache_key=$(printf '%s|%s|%s' "$provider" "$behavior" "$full_path" | md5sum 2>/dev/null | awk '{print $1}')
+                    provider_cache="/tmp/clash/fakeip_provider_${provider_cache_key}.cidr"
+                    if [ ! -f "$provider_cache" ]; then
+                        provider_raw="${provider_cache}.raw.$$"
+                        if ! extract_ipv4_cidr_from_rule_provider_file "$full_path" "$behavior" > "$provider_raw"; then
+                            rm -f "$provider_raw" "$provider_cache"
+                            missing_operand=true
+                            break
+                        fi
+                        filter_valid_provider_entries < "$provider_raw" | sort -u > "$provider_cache"
+                        rm -f "$provider_raw"
+                    fi
+                    cp "$provider_cache" "$operand_file" || { missing_operand=true; break; }
+                    provider_ui_key=$(printf '%s' "$provider" | md5sum 2>/dev/null | awk '{print $1}')
+                    provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}_provider.cidr"
+                    if ! grep -Fqx "$provider|$provider_ui_key|provider" "$provider_ui_map"; then
+                        printf '%s|%s|provider\n' "$provider" "$provider_ui_key" >> "$provider_ui_map"
+                        cat "$provider_cache" >> "$provider_ui_file"
+                    fi
+                    provider_labels="${provider_labels}${provider_labels:+ & }${provider}"
+                    ;;
+                IP-CIDR)
+                    printf '%s\n' "$operand_value" | filter_valid_provider_entries | sort -u > "$operand_file"
+                    [ -s "$operand_file" ] || { missing_operand=true; break; }
+                    provider="IP-CIDR:${operand_value}"
+                    provider_ui_key=$(printf '%s' "$provider" | md5sum 2>/dev/null | awk '{print $1}')
+                    provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}_inline.cidr"
+                    if ! grep -Fqx "$provider|$provider_ui_key|inline" "$provider_ui_map"; then
+                        printf '%s|%s|inline\n' "$provider" "$provider_ui_key" >> "$provider_ui_map"
+                        cat "$operand_file" >> "$provider_ui_file"
+                    fi
+                    provider_labels="${provider_labels}${provider_labels:+ & }${provider}"
+                    ;;
+                *) missing_operand=true; break ;;
+            esac
+
+            if [ "$operand_index" -eq 0 ]; then
+                cp "$operand_file" "$rule_result" || { missing_operand=true; break; }
+            else
+                intersect_ipv4_cidr_files "$rule_result" "$operand_file" > "${rule_result}.tmp" \
+                    && mv -f "${rule_result}.tmp" "$rule_result" || { missing_operand=true; break; }
+            fi
+            operand_index=$((operand_index + 1))
+        done <<EOF
+$(printf '%s' "$operand_spec" | tr ';' '\n')
+EOF
+
+        rm -f "${rule_work}.operand."*
+        if [ "$missing_operand" = "true" ] || [ ! -s "$rule_result" ]; then
+            rm -f "$rule_result" "${rule_result}.tmp"
+            continue
+        fi
+
+        key=$(printf '%s|%s|%s' "$network" "$ports" "$action_kind" | md5sum 2>/dev/null | awk '{print $1}')
+        group_file="/tmp/clash/fakeip_port_group_${key}.cidr"
+        [ -f "$group_file" ] || : > "$group_file"
+        awk -v auto="$auto_file" 'BEGIN { while ((getline x < auto) > 0) covered[x]=1; close(auto) } NF && !covered[$0] { print }' "$rule_result" >> "$group_file"
+        printf '%s|%s\n' "$key" "$provider_labels" >> "$source_map"
+        printf '%s|%s|%s|%s\n' "$key" "$network" "$ports" "$action_kind" >> "$metadata"
+        rm -f "$rule_result"
+    done
+
+    # Deduplicate metadata before comparing rules. Without this early pass,
+    # repeated RULE-SET references make the comparison quadratic in the number
+    # of source rules rather than in the number of unique port groups.
+    if [ -f "$metadata" ]; then
+        sort -u "$metadata" > "${metadata}.unique"
+        mv "${metadata}.unique" "$metadata"
+        while IFS='|' read -r key network ports action; do
+            group_file="/tmp/clash/fakeip_port_group_${key}.cidr"
+            if [ -s "$group_file" ]; then
+                sort -u "$group_file" -o "$group_file"
+            else
+                rm -f "$group_file"
+            fi
+        done < "$metadata"
+    fi
+    # Share one native CIDR set between rules whose final CIDR contents match.
+    # Keep each network/port condition as a separate metadata rule, but replace
+    # the condition-derived set key with a content-derived key.
+    sort -u "$source_map" -o "$source_map"
+    local normalized_metadata="${metadata}.normalized"
+    : > "$normalized_metadata"
+    : > "$ui_rows"
+    while IFS='|' read -r key network ports action; do
+        group_file="/tmp/clash/fakeip_port_group_${key}.cidr"
+        if [ ! -s "$group_file" ]; then
+            rm -f "$group_file"
+            continue
+        fi
+        sort -u "$group_file" -o "$group_file"
+        local set_digest set_key set_file provider_labels set_count
+        set_digest=$(md5sum "$group_file" 2>/dev/null | awk '{print $1}')
+        [ -n "$set_digest" ] || return 1
+        set_key="set_${set_digest}"
+        set_file="/tmp/clash/fakeip_port_group_${set_key}.cidr"
+        if [ "$group_file" != "$set_file" ]; then
+            if [ -e "$set_file" ]; then
+                rm -f "$group_file"
+            else
+                mv "$group_file" "$set_file" || return 1
+            fi
+        fi
+        set_count=$(wc -l < "$set_file" | xargs)
+        provider_labels=$(awk -F'|' -v k="$key" '$1 == k { if (out != "") out=out ", "; out=out $2 } END { print out }' "$source_map")
+        printf '%s|%s|%s|%s\n' "$set_key" "$network" "$ports" "$action" >> "$normalized_metadata"
+        printf '%s|%s|%s|%s|%s\n' "$set_key" "$provider_labels" "$network" "$ports" "$set_count" >> "$ui_rows"
+    done < "$metadata"
+    mv -f "$normalized_metadata" "$metadata" || return 1
+    sort -u "$metadata" -o "$metadata"
+
+    # Count each provider's own unique CIDRs for the status table. The active
+    # firewall sets remain merged by condition/content for efficient matching.
+    sort -u "$provider_ui_map" -o "$provider_ui_map"
+    while IFS='|' read -r provider provider_ui_key source_kind; do
+        [ -n "$provider" ] || continue
+        local provider_ui_source="/tmp/clash/fakeip_provider_ui_${provider_ui_key}_${source_kind}.cidr"
+        provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}.cidr"
+        [ -s "$provider_ui_source" ] || continue
+        cat "$provider_ui_source" >> "$provider_ui_file"
+    done < "$provider_ui_map"
+    awk -F'|' '!seen[$1 FS $2]++ { print $1 "|" $2 }' "$provider_ui_map" | while IFS='|' read -r provider provider_ui_key; do
+        [ -n "$provider" ] || continue
+        provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}.cidr"
+        [ -s "$provider_ui_file" ] || continue
+        sort -u "$provider_ui_file" -o "$provider_ui_file"
+        printf '%s|%s\n' "$provider" "$(wc -l < "$provider_ui_file" | xargs)" >> "$provider_ui_counts"
+        rm -f "$provider_ui_file"
+    done
+
+    awk -F'|' -v counts_file="$provider_ui_counts" '
+        BEGIN {
+            while ((getline row < counts_file) > 0) {
+                split(row, fields, FS)
+                if (fields[1] != "" && fields[2] ~ /^[0-9]+$/) source_counts[fields[1]] = fields[2]
+            }
+            close(counts_file)
+        }
+        NF >= 5 {
+            key=$1
+            labels=$2
+            set_count=$5
+            gsub(/[[:space:]]*&[[:space:]]*/, ",", labels)
+            count=split(labels, names, /,[[:space:]]*/)
+            for (i=1; i<=count; i++) {
+                provider=names[i]
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", provider)
+                if (provider != "") {
+                    provider_count = (provider in source_counts) ? source_counts[provider] : set_count
+                    print provider "|" $3 "|" $4 "|" provider_count "|" key "|" set_count
+                }
+            }
+        }
+    ' "$ui_rows" | sort -u > "$ui_summary"
+    local generated_groups generated_cidrs
+    generated_groups=$(wc -l < "$metadata" 2>/dev/null | xargs)
+    generated_cidrs=0
+    for group_file in /tmp/clash/fakeip_port_group_*.cidr; do
+        [ -f "$group_file" ] || continue
+        group_lines=$(wc -l < "$group_file" | xargs)
+        generated_cidrs=$((generated_cidrs + group_lines))
+    done
+    if [ "${generated_groups:-0}" -gt "$GROUPED_FAKEIP_MAX_GROUPS" ] || [ "${generated_cidrs:-0}" -gt "$GROUPED_FAKEIP_MAX_CIDRS" ]; then
+        warn "Grouped fakeip generation exceeds limits: groups=${generated_groups:-0}/${GROUPED_FAKEIP_MAX_GROUPS}, CIDRs=${generated_cidrs:-0}/${GROUPED_FAKEIP_MAX_CIDRS}"
+        rm -f "$auto_file"
+        clear_grouped_port_artifacts
+        return 1
+    fi
+    printf '%s|%s\n' "${generated_groups:-0}" "${generated_cidrs:-0}" > "$GROUPED_FAKEIP_STATS_FILE"
+    printf '%s\n' "$grouped_digest" > "$GROUPED_FAKEIP_DIGEST_FILE"
+    rm -f "$auto_file"
+    rm -f "$source_map" "$ui_rows" "$provider_ui_map" "$provider_ui_counts" \
+        /tmp/clash/fakeip_provider_ui_*.cidr
+}
+
+# Apply the grouped port sources as native IPv4 nft sets plus dport rules.
+# This avoids the memory-heavy ipv4_addr . inet_service concatenation set.
+apply_grouped_port_nft_rules() {
+    [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ] || return 0
+    [ -f /tmp/clash/fakeip_port_groups ] || return 0
+    [ -s /tmp/clash/fakeip_port_groups ] || return 0
+    hash nft 2>/dev/null || return 0
+
+    local batch="/tmp/clash/fakeip_port_groups.nft"
+    local batch_digest_file="$GROUPED_FAKEIP_BATCH_DIGEST_FILE"
+    local batch_tmp="${batch}.tmp.$$"
+    local source_digest batch_digest saved_batch_digest batch_checksum saved_batch_checksum cache_hit="false"
+    local batch_to_apply
+    local udp_mark="$MARK_TPROXY"
+    local group_count cidr_count
+    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
+    mkdir -p /tmp/clash
+    source_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+    [ -n "$source_digest" ] || {
+        warn "Grouped source digest is missing; refusing to apply an unverified batch"
+        return 1
+    }
+    batch_digest=$(printf '%s|%s|%s|%s' "$source_digest" "$PROXY_MODE" "$MARK_TPROXY" "$MARK_TUN_UDP" | md5sum 2>/dev/null | awk '{print $1}')
+    saved_batch_digest=""
+    [ -f "$batch_digest_file" ] && saved_batch_digest=$(cat "$batch_digest_file" 2>/dev/null)
+    batch_checksum=""
+    [ -s "$batch" ] && batch_checksum=$(md5sum "$batch" 2>/dev/null | awk '{print $1}')
+    saved_batch_checksum=""
+    [ -f "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE" ] && saved_batch_checksum=$(cat "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE" 2>/dev/null)
+    if [ -s "$batch" ] && [ "$batch_digest" = "$saved_batch_digest" ] \
+       && [ -n "$batch_checksum" ] && [ "$batch_checksum" = "$saved_batch_checksum" ]; then
+        cache_hit="true"
+        msg "Grouped nft batch unchanged, reusing cached batch"
+    fi
+
+    if [ -s "$GROUPED_FAKEIP_STATS_FILE" ]; then
+        IFS='|' read -r group_count cidr_count < "$GROUPED_FAKEIP_STATS_FILE"
+    else
+        group_count=$(wc -l < /tmp/clash/fakeip_port_groups | xargs)
+        cidr_count=0
+        for group_file in /tmp/clash/fakeip_port_group_*.cidr; do
+            [ -f "$group_file" ] || continue
+            group_lines=$(wc -l < "$group_file" | xargs)
+            cidr_count=$((cidr_count + group_lines))
+        done
+    fi
+    if [ -f /tmp/clash/fakeip_port_rules_summary ]; then
+        while IFS='|' read -r provider network ports action; do
+            [ -n "$provider" ] || continue
+            msg "Grouped rule: $provider + ports=$ports${network:+ (network=$network)}"
+        done < /tmp/clash/fakeip_port_rules_summary
+    fi
+
+    if [ "$cache_hit" != "true" ]; then
+    : > "$batch_tmp"
+    # A content-shared CIDR set can be referenced by several protocol/port
+    # rules. Create and populate every unique set exactly once.
+    for group_file in /tmp/clash/fakeip_port_group_set_*.cidr; do
+        [ -s "$group_file" ] || continue
+        set_key="${group_file##*/fakeip_port_group_}"
+        set_key="${set_key%.cidr}"
+        short=$(printf '%s' "${set_key#set_}" | cut -c1-12)
+        set_name="fp_${short}"
+        printf 'add set inet clash %s { type ipv4_addr; flags interval; auto-merge; }\n' "$set_name" >> "$batch_tmp"
+        awk -v s="$set_name" '
+            BEGIN { n=0; line="" }
+            NF {
+                if (n++) line = line (line ? ", " : "") $0
+                if (n >= 500) {
+                    print "add element inet clash " s " { " line " }"
+                    n=0; line=""
+                }
+            }
+            END { if (n) print "add element inet clash " s " { " line " }" }
+        ' "$group_file" >> "$batch_tmp"
+    done
+
+    # Keep every distinct NETWORK/DST-PORT condition as its own rule, while
+    # pointing it at the shared set selected above.
+    while IFS='|' read -r key network ports action; do
+        [ -n "$key" ] || continue
+        local short set_name group_file port_expr
+        short=$(printf '%s' "${key#set_}" | cut -c1-12)
+        set_name="fp_${short}"
+        group_file="/tmp/clash/fakeip_port_group_${key}.cidr"
+        [ -s "$group_file" ] || continue
+
+        case "$ports" in
+            *,*) port_expr="{ $ports }" ;;
+            *)   port_expr="$ports" ;;
+        esac
+        case "$network" in
+            tcp)
+                if [ "$action" = "reject" ]; then
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                else
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
+                fi
+                ;;
+            udp)
+                if [ "$action" = "reject" ]; then
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                else
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
+                fi
+                ;;
+            *)
+                if [ "$action" = "reject" ]; then
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                else
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
+                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
+                fi
+                ;;
+        esac
+    done < /tmp/clash/fakeip_port_groups
+
+    if [ ! -s "$batch_tmp" ]; then
+        rm -f "$batch_tmp" "$batch" "$batch_digest_file" "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE"
+        return 0
+    fi
+    if ! nft -c -f "$batch_tmp"; then
+        rm -f "$batch_tmp"
+        warn "Generated grouped nft batch failed validation; cached batch was preserved"
+        return 1
+    fi
+    fi
+
+    if [ "$GROUPED_FAKEIP_PORT_RULES_DRY_RUN" = "true" ]; then
+        if [ "$cache_hit" != "true" ]; then
+            mv -f "$batch_tmp" "$batch" || return 1
+            printf '%s\n' "$batch_digest" > "${batch_digest_file}.tmp.$$" && mv -f "${batch_digest_file}.tmp.$$" "$batch_digest_file"
+            md5sum "$batch" 2>/dev/null | awk '{print $1}' > "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" && mv -f "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE"
+        fi
+        msg "Grouped fakeip summary: $group_count groups, $cidr_count CIDR entries; batch: $batch (dry-run)"
+        return 0
+    fi
+    batch_to_apply="$batch"
+    [ "$cache_hit" = "true" ] || batch_to_apply="$batch_tmp"
+    if nft -f "$batch_to_apply"; then
+        if [ "$cache_hit" != "true" ]; then
+            mv -f "$batch_tmp" "$batch" || return 1
+            printf '%s\n' "$batch_digest" > "${batch_digest_file}.tmp.$$" && mv -f "${batch_digest_file}.tmp.$$" "$batch_digest_file"
+            md5sum "$batch" 2>/dev/null | awk '{print $1}' > "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" && mv -f "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE"
+        fi
+        msg "Applied grouped fakeip port nft rules: $group_count groups, $cidr_count CIDR entries"
+        return 0
+    fi
+    [ "$cache_hit" = "true" ] || rm -f "$batch_tmp"
+    warn "Failed to apply grouped fakeip port nft rules"
+    return 1
 }
 
 # Parse the dns.fake-ip-filter: list and return the names of rule-sets referenced
@@ -1012,6 +1789,176 @@ extract_ipv4_cidr_from_rule_provider_file() {
     esac
 }
 
+# Extract grouped entries from a classical provider payload containing rules
+# such as: - AND,((IP-CIDR,1.2.3.0/24),(NETWORK,udp),(DST-PORT,80-443))
+# Output: cidr|network|ports
+extract_classical_and_ipcidr_entries() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    awk '
+    {
+        line=$0
+        sub(/#.*/, "", line)
+        if (line !~ /AND,/) next
+        network="*"
+        if (match(line, /NETWORK,[A-Za-z0-9_-]+/)) {
+            network=substr(line, RSTART+8, RLENGTH-8)
+            network=tolower(network)
+        }
+        if (!match(line, /DST-PORT,[0-9,-]+/)) next
+        ports=substr(line, RSTART+9, RLENGTH-9)
+        rest=line
+        while (match(rest, /IP-CIDR,[^,()[:space:]]+/)) {
+            cidr=substr(rest, RSTART+8, RLENGTH-8)
+            if (cidr != "" && index(cidr, ":") == 0)
+                print cidr "|" network "|" ports
+            rest=substr(rest, RSTART+RLENGTH)
+        }
+    }' "$file"
+}
+
+# Validate a provider stream in one AWK process rather than spawning grep for
+# every CIDR. Input can be either a plain CIDR or CIDR|network|ports; in the
+# grouped form only the first field is validated and the rest is preserved.
+filter_valid_provider_entries() {
+    awk '
+    function valid_ipv4_cidr(value, parts, count, octets, octet_count, prefix, i, n) {
+        count = split(value, parts, "/")
+        if (count < 1 || count > 2) return 0
+        octet_count = split(parts[1], octets, "[.]")
+        if (octet_count != 4) return 0
+        for (i = 1; i <= 4; i++) {
+            if (octets[i] !~ /^[0-9]+$/) return 0
+            n = octets[i] + 0
+            if (n > 255) return 0
+        }
+        if (count == 2) {
+            prefix = parts[2]
+            if (prefix !~ /^[0-9]+$/ || prefix + 0 > 32) return 0
+        }
+        return 1
+    }
+    {
+        line = $0
+        sub(/\r$/, "", line)
+        sub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line == "") next
+
+        sep = index(line, "|")
+        cidr = sep ? substr(line, 1, sep - 1) : line
+        sub(/^[[:space:]]+|[[:space:]]+$/, "", cidr)
+        if (valid_ipv4_cidr(cidr)) {
+            if (sep) print cidr substr(line, sep)
+            else print cidr
+        }
+    }'
+}
+
+# Intersect two IPv4 CIDR files by address range rather than textual equality.
+# This correctly handles cases such as 10.0.0.0/24 AND 10.0.0.5/32, and keeps
+# work proportional to the number of intervals rather than their size.
+intersect_ipv4_cidr_files() {
+    local left="$1"
+    local right="$2"
+    local prefix="/tmp/clash/cidr_intersection.$$"
+    local left_ranges="${prefix}.left"
+    local right_ranges="${prefix}.right"
+    local overlap_ranges="${prefix}.overlap"
+
+    [ -s "$left" ] && [ -s "$right" ] || return 0
+    mkdir -p /tmp/clash || return 1
+
+    awk '
+        function ip_number(value, octets) {
+            split(value, octets, /[.]/)
+            return (((octets[1] * 256 + octets[2]) * 256 + octets[3]) * 256 + octets[4])
+        }
+        {
+            split($0, parts, /[/]/)
+            prefix = (length(parts) > 1 ? parts[2] + 0 : 32)
+            size = 2 ^ (32 - prefix)
+            first = int(ip_number(parts[1]) / size) * size
+            print first "|" (first + size - 1)
+        }
+    ' "$left" | sort -n | awk -F'|' '
+        NR == 1 { first=$1; last=$2; next }
+        $1 <= last + 1 { if ($2 > last) last=$2; next }
+        { print first "|" last; first=$1; last=$2 }
+        END { if (NR) print first "|" last }
+    ' > "$left_ranges" || { rm -f "$left_ranges" "$right_ranges" "$overlap_ranges"; return 1; }
+
+    awk '
+        function ip_number(value, octets) {
+            split(value, octets, /[.]/)
+            return (((octets[1] * 256 + octets[2]) * 256 + octets[3]) * 256 + octets[4])
+        }
+        {
+            split($0, parts, /[/]/)
+            prefix = (length(parts) > 1 ? parts[2] + 0 : 32)
+            size = 2 ^ (32 - prefix)
+            first = int(ip_number(parts[1]) / size) * size
+            print first "|" (first + size - 1)
+        }
+    ' "$right" | sort -n | awk -F'|' '
+        NR == 1 { first=$1; last=$2; next }
+        $1 <= last + 1 { if ($2 > last) last=$2; next }
+        { print first "|" last; first=$1; last=$2 }
+        END { if (NR) print first "|" last }
+    ' > "$right_ranges" || { rm -f "$left_ranges" "$right_ranges" "$overlap_ranges"; return 1; }
+
+    awk -F'|' -v right_file="$right_ranges" '
+        BEGIN {
+            while ((getline line < right_file) > 0) {
+                split(line, range, /[|]/)
+                right_first[++right_count] = range[1] + 0
+                right_last[right_count] = range[2] + 0
+            }
+            close(right_file)
+        }
+        {
+            left_first = $1 + 0
+            left_last = $2 + 0
+            while (cursor <= right_count && right_last[cursor] < left_first) cursor++
+            i = cursor
+            while (i <= right_count && right_first[i] <= left_last) {
+                first = (left_first > right_first[i] ? left_first : right_first[i])
+                last = (left_last < right_last[i] ? left_last : right_last[i])
+                if (first <= last) print first "|" last
+                i++
+            }
+            cursor = i
+        }
+    ' "$left_ranges" > "$overlap_ranges" || { rm -f "$left_ranges" "$right_ranges" "$overlap_ranges"; return 1; }
+
+    awk -F'|' '
+        function ip_text(value) {
+            return int(value / 16777216) "." int(value / 65536) % 256 "." int(value / 256) % 256 "." value % 256
+        }
+        {
+            first=$1 + 0
+            last=$2 + 0
+            while (first <= last) {
+                size=1
+                prefix=32
+                while (size * 2 <= 4294967296 && first % (size * 2) == 0) {
+                    size *= 2
+                    prefix--
+                }
+                remaining=last - first + 1
+                while (size > remaining) {
+                    size /= 2
+                    prefix++
+                }
+                print ip_text(first) "/" prefix
+                first += size
+            }
+        }
+    ' "$overlap_ranges"
+    local rc=$?
+    rm -f "$left_ranges" "$right_ranges" "$overlap_ranges"
+    return "$rc"
+}
+
 # Produce the auto-generated IPv4 CIDR list for the fakeip whitelist.
 # Sources: non-DIRECT rules: in config.yaml, plus dns.fake-ip-filter: per
 # fake-ip-filter-mode (whitelist: RULE-SET:<name> only; rule: RULE-SET,<name>,fake-ip).
@@ -1022,10 +1969,7 @@ extract_ipv4_cidr_from_rule_provider_file() {
 # comment inside the whitelist file).
 AUTO_FAKEIP_SOURCES=""
 AUTO_FAKEIP_INCOMPLETE="false"
-generate_fakeip_whitelist_auto() {
-    AUTO_FAKEIP_SOURCES=""
-    AUTO_FAKEIP_INCOMPLETE="false"
-
+get_fakeip_whitelist_provider_names() {
     local proxy_sets
     proxy_sets=$(extract_proxy_rule_set_names)
 
@@ -1044,11 +1988,25 @@ generate_fakeip_whitelist_auto() {
             | grep -v '^$' | sort -u)
     fi
 
-    [ -z "$proxy_sets" ] && return 0
+    printf '%s\n' "$proxy_sets" | grep -v '^$' | sort -u
+}
+
+generate_fakeip_whitelist_auto() {
+	AUTO_FAKEIP_SOURCES=""
+	AUTO_FAKEIP_INCOMPLETE="false"
+
+	local proxy_sets inline_cidrs
+	proxy_sets=$(get_fakeip_whitelist_provider_names)
+	inline_cidrs=$(extract_proxy_ip_cidr_rules)
+	if [ -z "$proxy_sets" ] && [ -z "$inline_cidrs" ]; then
+		mkdir -p "$(dirname "$FAKEIP_WHITELIST_SUMMARY_FILE")" 2>/dev/null
+		printf 'entries|0\n' > "$FAKEIP_WHITELIST_SUMMARY_FILE"
+		return 0
+	fi
 
     local providers
     providers=$(extract_rule_providers)
-    if [ -z "$providers" ]; then
+    if [ -n "$proxy_sets" ] && [ -z "$providers" ]; then
         AUTO_FAKEIP_INCOMPLETE="true"
         msg "Auto fakeip whitelist: rule-providers are referenced but none could be parsed"
         return 0
@@ -1063,10 +2021,13 @@ generate_fakeip_whitelist_auto() {
     tmp_sources="/tmp/clash/clash_autowl_sources.$$"
     local tmp_incomplete
     tmp_incomplete="/tmp/clash/clash_autowl_incomplete.$$"
+    local tmp_counts
+    tmp_counts="/tmp/clash/clash_autowl_counts.$$"
     mkdir -p /tmp/clash
     : > "$tmp_out"
     : > "$tmp_sources"
     : > "$tmp_incomplete"
+    : > "$tmp_counts"
 
     local set_name
     echo "$proxy_sets" | while IFS= read -r set_name; do
@@ -1107,8 +2068,15 @@ generate_fakeip_whitelist_auto() {
         if [ -n "$entries" ]; then
             echo "$entries" >> "$tmp_out"
             echo "$set_name" >> "$tmp_sources"
+            printf '%s|%s\n' "$set_name" "$(printf '%s\n' "$entries" | wc -l | xargs)" >> "$tmp_counts"
         fi
     done
+
+    if [ -n "$inline_cidrs" ]; then
+        printf '%s\n' "$inline_cidrs" >> "$tmp_out"
+        printf 'inline-rules\n' >> "$tmp_sources"
+        printf 'inline-rules|%s\n' "$(printf '%s\n' "$inline_cidrs" | wc -l | xargs)" >> "$tmp_counts"
+    fi
 
     # Validate + dedupe + sort, printing to stdout
     local line
@@ -1128,7 +2096,15 @@ generate_fakeip_whitelist_auto() {
         AUTO_FAKEIP_INCOMPLETE="true"
     fi
 
-    rm -f "$tmp_out" "$tmp_sources" "$tmp_incomplete"
+    mkdir -p "$(dirname "$FAKEIP_WHITELIST_SUMMARY_FILE")" 2>/dev/null
+    {
+        printf 'entries|%s\n' "$(sort -u "$tmp_out" 2>/dev/null | wc -l | xargs)"
+        sort -u "$tmp_counts" 2>/dev/null | while IFS='|' read -r _source_count_name _source_count; do
+            [ -n "$_source_count_name" ] && printf 'provider|%s|%s\n' "$_source_count_name" "$_source_count"
+        done
+    } > "$FAKEIP_WHITELIST_SUMMARY_FILE"
+
+    rm -f "$tmp_out" "$tmp_sources" "$tmp_incomplete" "$tmp_counts"
 }
 
 # Function to extract server IPs from config.yaml (with subscription support)
@@ -2106,6 +3082,16 @@ teardown_iptables_tun_forward_rules() {
     msg "Removed clash-tun INPUT+FORWARD rules (iptables)"
 }
 
+# Roll back an incomplete nftables build. Removing the partially constructed
+# table is safer than reporting success with only some chains/rules installed.
+rollback_nft_rules() {
+    NFT_FAILURE_TRACKER=""
+    [ -n "$1" ] && rm -f "$1"
+    teardown_nft_tun_forward_rules
+    command nft delete table inet clash 2>/dev/null
+    return 1
+}
+
 # Apply nftables rules dynamically
 # =============================================================================
 # SECTION: Firewall rules — nftables and iptables implementations
@@ -2116,7 +3102,15 @@ apply_nft_rules() {
     local fake_ip_range="$2"
     local fake_ip_filter_mode="$3"
 
+    # `update` can rebuild this table without calling stop(). Remove the fw4
+    # accept hooks first; they live outside inet clash and would otherwise be
+    # inserted again on every grouped-source refresh.
+    teardown_nft_tun_forward_rules
     nft delete table inet clash 2>/dev/null
+    local nft_failure_file="/tmp/clash/nft_apply_failed.$$"
+    mkdir -p /tmp/clash
+    rm -f "$nft_failure_file"
+    NFT_FAILURE_TRACKER="$nft_failure_file"
 
     # Create table and chains with two-stage approach and proper priority ordering:
     # Stage 1: Mangle chain (priority -150) - interface filtering, exclusions, and packet marking
@@ -2164,7 +3158,7 @@ apply_nft_rules() {
 
     case "$MODE" in
         "explicit")
-            apply_nft_explicit_interface_mangle || return 1
+            apply_nft_explicit_interface_mangle || { rollback_nft_rules "$nft_failure_file"; return 1; }
             if [ -n "$fake_ip_range" ]; then
                 apply_nft_output_rules "$server_ips" "" "$fake_ip_filter_mode" "$fake_ip_range"
                 msg "nftables output rules applied for local fake-ip traffic (explicit mode)"
@@ -2196,6 +3190,12 @@ apply_nft_rules() {
         msg "Minimal exclusion rules applied (fake-ip-filter-mode: whitelist - only system protection)"
     fi
 
+    # Apply grouped provider/port rules after service, reserved-network and
+    # proxy-server exclusions so those returns always take precedence.
+    if [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; then
+        apply_grouped_port_nft_rules || { rollback_nft_rules "$nft_failure_file"; return 1; }
+    fi
+
     apply_nft_src_ip_cidr_policy
     apply_nft_src_ip_cidr_marking "$server_ips"
     apply_nft_marking_mangle "$fake_ip_range"
@@ -2206,7 +3206,34 @@ apply_nft_rules() {
     # Allow forwarding between LAN and clash-tun in TUN/MIXED mode
     apply_nft_tun_forward_rules
 
+    if [ -f "$nft_failure_file" ]; then
+        warn "One or more nftables commands failed; rolling back the incomplete firewall setup"
+        rollback_nft_rules "$nft_failure_file"
+        return 1
+    fi
+    NFT_FAILURE_TRACKER=""
+    rm -f "$nft_failure_file"
+
     msg "nftables rules applied successfully"
+}
+
+rollback_iptables_rules() {
+    IPTABLES_FAILURE_TRACKER=""
+    IPSET_FAILURE_TRACKER=""
+    [ -n "$1" ] && rm -f "$1"
+    rm -f "/tmp/clash/ipset_apply_failed.$$"
+    teardown_iptables_tun_forward_rules
+    iptables -t mangle -D PREROUTING -j CLASH 2>/dev/null
+    iptables -t mangle -D OUTPUT -j CLASH_LOCAL 2>/dev/null
+    iptables -t mangle -F CLASH 2>/dev/null
+    iptables -t mangle -X CLASH 2>/dev/null
+    iptables -t mangle -F CLASH_PROCESS 2>/dev/null
+    iptables -t mangle -X CLASH_PROCESS 2>/dev/null
+    iptables -t mangle -F CLASH_LOCAL 2>/dev/null
+    iptables -t mangle -X CLASH_LOCAL 2>/dev/null
+    iptables -t filter -D INPUT -p udp --dport 443 -j REJECT 2>/dev/null
+    iptables -t filter -D FORWARD -p udp --dport 443 -j REJECT 2>/dev/null
+    return 1
 }
 
 # Apply iptables rules dynamically
@@ -2214,6 +3241,13 @@ apply_iptables_rules() {
     local server_ips="$1"
     local fake_ip_range="$2"
     local fake_ip_filter_mode="$3"
+    local iptables_failure_file="/tmp/clash/iptables_apply_failed.$$"
+    local ipset_failure_file="/tmp/clash/ipset_apply_failed.$$"
+    mkdir -p /tmp/clash
+    rm -f "$iptables_failure_file"
+    rm -f "$ipset_failure_file"
+    IPTABLES_FAILURE_TRACKER="$iptables_failure_file"
+    IPSET_FAILURE_TRACKER="$ipset_failure_file"
 
     # Create all chains first before applying any rules
     iptables -t mangle -N CLASH 2>/dev/null
@@ -2222,7 +3256,11 @@ apply_iptables_rules() {
 
     # Set up fakeip whitelist ipset so that rules referencing it by name always succeed
     if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && hash ipset 2>/dev/null; then
-        ensure_fakeip_ipset && populate_fakeip_ipset_from_file
+        if ! ensure_fakeip_ipset || ! populate_fakeip_ipset_from_file; then
+            warn "Failed to prepare fakeip whitelist ipset"
+            rollback_iptables_rules "$iptables_failure_file"
+            return 1
+        fi
     fi
 
     # Exclude forwarded traffic (DNAT) from TPROXY to prevent conflicts.
@@ -2234,7 +3272,7 @@ apply_iptables_rules() {
     # Apply rules based on the operation mode
     case "$MODE" in
         "explicit")
-            apply_iptables_explicit_interface_rules || return 1
+            apply_iptables_explicit_interface_rules || { rollback_iptables_rules "$iptables_failure_file"; return 1; }
             ;;
         *) # exclude mode
             local excluded_interfaces=$(get_excluded_interfaces)
@@ -2275,6 +3313,16 @@ apply_iptables_rules() {
     else
         msg "iptables rules applied successfully (explicit mode without output processing)"
     fi
+    if [ -f "$iptables_failure_file" ] || [ -f "$ipset_failure_file" ]; then
+        warn "One or more iptables/ipset commands failed; rolling back the incomplete firewall setup"
+        rm -f "$ipset_failure_file"
+        rollback_iptables_rules "$iptables_failure_file"
+        return 1
+    fi
+    IPTABLES_FAILURE_TRACKER=""
+    IPSET_FAILURE_TRACKER=""
+    rm -f "$iptables_failure_file"
+    rm -f "$ipset_failure_file"
 }
 
 # This function intelligently updates subscription IPs without a full script restart
@@ -2288,7 +3336,10 @@ update_rules() {
     # Also refresh the auto-generated fakeip whitelist on this same cron cycle
     # (runs every 30 minutes by default). update_fakeip_whitelist_sets is a
     # no-op when the current fake-ip-filter-mode is neither whitelist nor rule.
-    update_fakeip_whitelist_sets
+    update_fakeip_whitelist_sets || {
+        msg "ERROR: Failed to refresh fakeip whitelist/grouped rules"
+        return 1
+    }
 
     local old_ips=""
     if [ -f "$SUBSCRIPTION_CACHE_FILE" ]; then
@@ -2315,21 +3366,40 @@ update_rules() {
     msg "Subscription IPs have changed. Applying delta update."
 
     if hash nft 2>/dev/null && nft list set inet clash proxy_servers >/dev/null 2>&1; then
-        # For nftables, simply flush the set and add all new IPs.
-        # This is atomic and much faster than comparing IPs.
+        # Rebuild from the complete current server list, not only subscription
+        # IPs. The set also contains static `proxies:` servers and must retain
+        # them after a subscription-cache change. Apply flush+populate as one
+        # nft transaction so a failed add leaves the previous set intact.
         msg "Updating nftables proxy_servers set..."
-        nft flush set inet clash proxy_servers
-        if [ -n "$new_ips" ]; then
-            # Ensure unique IPs before adding to nft set for accurate logging
-            local unique_ips
-            unique_ips=$(echo "$new_ips" | sort -u)
-            # Format IPs for nft: { ip1, ip2, ip3 }
-            local nft_elements
-            nft_elements=$(echo "$unique_ips" | tr '\n' ',' | sed 's/,$//')
-            nft add element inet clash proxy_servers "{ $nft_elements }"
-            msg "Updated proxy_servers set with $(echo "$unique_ips" | wc -l | xargs) unique IPs."
+        local all_server_ips unique_ips nft_batch
+        all_server_ips=$(extract_server_ips)
+        unique_ips=$(printf '%s\n' "$all_server_ips" | grep -v '^$' | sort -u)
+        nft_batch="/tmp/clash/proxy_servers_update.$$"
+        {
+            printf 'flush set inet clash proxy_servers\n'
+            if [ -n "$unique_ips" ]; then
+                printf '%s\n' "$unique_ips" | awk '
+                    BEGIN { count=0; line="" }
+                    {
+                        if (count > 0) line = line ", "
+                        line = line $0
+                        count++
+                        if (count >= 500) {
+                            print "add element inet clash proxy_servers { " line " }"
+                            count=0; line=""
+                        }
+                    }
+                    END { if (count > 0) print "add element inet clash proxy_servers { " line " }" }
+                '
+            fi
+        } > "$nft_batch"
+        if nft -c -f "$nft_batch" && nft -f "$nft_batch"; then
+            rm -f "$nft_batch"
+            msg "Updated proxy_servers set with $(printf '%s\n' "$unique_ips" | grep -c . | xargs) current server IPs."
         else
-            msg "No subscription IPs to add to the set."
+            rm -f "$nft_batch"
+            msg "ERROR: Failed to update proxy_servers set; previous entries were preserved"
+            return 1
         fi
     elif hash iptables 2>/dev/null; then
         # For iptables, find the difference and apply changes incrementally.
@@ -2403,26 +3473,28 @@ setup_routing_rules() {
             # black-holed while clash-tun is still coming up; the hotplug
             # script replaces this with "default dev clash-tun" once the
             # interface appears.
-            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null
-            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null
+            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null || return 1
             msg "Routing: fwmark $MARK_TPROXY → table $TABLE_TPROXY pref $PREF_TPROXY (TUN mode)"
             # Best-effort: install the real route immediately in case clash-tun
             # is already up (fast procd respawn, interface survived restart).
             ip route replace default dev clash-tun table "$TABLE_TPROXY" 2>/dev/null && \
-                msg "TUN route set immediately (clash-tun already up)"
+                msg "TUN route set immediately (clash-tun already up)" || \
+                msg "TUN route will be installed by clash-tun hotplug"
             ;;
         "mixed")
-            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null
-            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null
-            ip rule add pref "$PREF_TUN_UDP" fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null
+            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null || return 1
+            ip rule add pref "$PREF_TUN_UDP" fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null || return 1
             msg "Routing: TCP fwmark $MARK_TPROXY → table $TABLE_TPROXY pref $PREF_TPROXY, UDP fwmark $MARK_TUN_UDP → table $TABLE_TUN_UDP pref $PREF_TUN_UDP (MIXED mode)"
             # Best-effort: install the real route immediately if already up.
             ip route replace default dev clash-tun table "$TABLE_TUN_UDP" 2>/dev/null && \
-                msg "TUN route set immediately (clash-tun already up)"
+                msg "TUN route set immediately (clash-tun already up)" || \
+                msg "MIXED UDP route will be installed by clash-tun hotplug"
             ;;
         *)
-            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null
-            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null
+            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null || return 1
             msg "Routing: fwmark $MARK_TPROXY → table $TABLE_TPROXY pref $PREF_TPROXY (TPROXY mode)"
             ;;
     esac
@@ -2432,17 +3504,18 @@ setup_routing_rules() {
 # Cleans up all modes unconditionally (errors suppressed) so that stop()
 # works correctly even if PROXY_MODE changed since start.
 teardown_routing_rules() {
-    # Flush entire routing tables rather than removing individual routes.
-    # This is more robust across mode switches
+    # Remove only routes created by SSClash rather than flushing entire tables.
+    # Other policy-routing users may keep unrelated routes in tables 100/101.
     # approach — any stale entries from previous configurations are cleared.
-    ip route flush table "$TABLE_TPROXY" 2>/dev/null
-    ip route flush table "$TABLE_TUN_UDP" 2>/dev/null
+    while ip route del local default dev lo table "$TABLE_TPROXY" 2>/dev/null; do :; done
+    while ip route del default dev clash-tun table "$TABLE_TPROXY" 2>/dev/null; do :; done
+    while ip route del default dev clash-tun table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
 
     # ip rule del removes only ONE matching rule per call; use an unbounded
     # while loop (same pattern as tun_route_reset_rule) so all duplicates
     # accumulated from unclean restarts are fully removed.
-    while ip rule del fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null; do :; done
-    while ip rule del fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
+    while ip rule del pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null; do :; done
+    while ip rule del pref "$PREF_TUN_UDP" fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
 }
 
 # Atomically refresh the fakeip whitelist IP-CIDR set contents (nft set or ipset)
@@ -2461,37 +3534,49 @@ refresh_fakeip_whitelist_file() {
     [ "$AUTO_FAKEIP_WHITELIST" = "true" ] || return 0
     is_ipcidr_whitelist_mode || return 0
 
-    # Fast-path: compute a combined md5sum of all ipcidr/classical source files.
-    # If it matches the saved digest and the whitelist file already exists,
-    # no provider content has changed → skip the expensive generation entirely.
-    # This avoids re-running the full entry validation loop on every start.
+    # Fast-path digest must include the selected providers/rules as well as
+    # their files. Hashing every provider file alone misses config rule changes
+    # when the set of available provider files stays the same.
     local _fp_base_dir _fp_digest_file _fp_current_digest _fp_saved_digest
+    local _fp_selected _fp_providers _fp_inline _fp_summary_count existing_auto_count
     _fp_base_dir=$(get_providers_base_dir)
     _fp_digest_file="/opt/clash/lst/mrs_cache/.whitelist_src_digest"
     mkdir -p /opt/clash/lst/mrs_cache 2>/dev/null
+    _fp_selected=$(get_fakeip_whitelist_provider_names)
+    _fp_inline=$(extract_proxy_ip_cidr_rules)
+    _fp_providers=$(extract_rule_providers)
     _fp_current_digest=$(
-        extract_rule_providers | while IFS='|' read -r _n beh _t rpath; do
-            case "$beh" in classical|ipcidr) ;; *) continue ;; esac
-            case "$rpath" in
-                ./*) _f="$_fp_base_dir/${rpath#./}" ;;
-                /*)  _f="$rpath" ;;
-                *)   _f="$_fp_base_dir/$rpath" ;;
-            esac
-            [ -f "$_f" ] && md5sum "$_f" 2>/dev/null | awk '{print $1}'
-        done | md5sum | awk '{print $1}'
+        {
+            printf 'generator=3\nmode=%s\nselected=%s\ninline-ipcidr=%s\n' \
+                "$FAKE_IP_FILTER_MODE" "$_fp_selected" "$_fp_inline"
+            printf '%s\n' "$_fp_selected" | while IFS= read -r _n; do
+                [ -n "$_n" ] || continue
+                _provider_line=$(printf '%s\n' "$_fp_providers" | awk -F'|' -v n="$_n" '$1 == n { print; exit }')
+                if [ -z "$_provider_line" ]; then
+                    printf 'undefined-provider=%s\n' "$_n"
+                    continue
+                fi
+                printf 'provider=%s\n' "$_provider_line"
+                _beh=$(printf '%s\n' "$_provider_line" | awk -F'|' '{print $2}')
+                _path=$(printf '%s\n' "$_provider_line" | awk -F'|' '{print $4}')
+                case "$_path" in
+                    ./*) _f="$_fp_base_dir/${_path#./}" ;;
+                    /*)  _f="$_path" ;;
+                    *)   _f="$_fp_base_dir/$_path" ;;
+                esac
+                case "$_beh" in classical|ipcidr) ;; *) printf 'unsupported-behavior=%s\n' "$_beh"; continue ;; esac
+                if [ -f "$_f" ]; then
+                    printf 'source=%s|' "$_f"
+                    md5sum "$_f" 2>/dev/null | awk '{print $1}'
+                else
+                    printf 'missing-source=%s\n' "$_f"
+                fi
+            done
+        } | md5sum | awk '{print $1}'
     )
     _fp_saved_digest=""
     [ -f "$_fp_digest_file" ] && _fp_saved_digest=$(cat "$_fp_digest_file" 2>/dev/null)
-    if [ -n "$_fp_saved_digest" ] && [ "$_fp_current_digest" = "$_fp_saved_digest" ] \
-       && [ -f "$FAKEIP_WHITELIST_FILE" ]; then
-        msg "Auto fakeip whitelist sources unchanged, skipping regeneration"
-        return 0
-    fi
-
-    # Run generate_fakeip_whitelist_auto with stdout redirected — NOT via
-    # command substitution. The latter would fork a subshell and discard
-    # AUTO_FAKEIP_SOURCES, breaking the # Sources: header and log lines.
-    local existing_auto_count=0
+    existing_auto_count=0
     if [ -f "$FAKEIP_WHITELIST_FILE" ]; then
         existing_auto_count=$(awk '
             /^#[[:space:]]*AUTO-BEGIN/ { in_auto = 1; next }
@@ -2506,19 +3591,40 @@ refresh_fakeip_whitelist_file() {
             END { print count + 0 }
         ' "$FAKEIP_WHITELIST_FILE" 2>/dev/null)
     fi
+    _fp_summary_count=$(awk -F'|' '$1 == "entries" { print $2; exit }' "$FAKEIP_WHITELIST_SUMMARY_FILE" 2>/dev/null)
+    if [ -n "$_fp_saved_digest" ] && [ "$_fp_current_digest" = "$_fp_saved_digest" ] \
+       && [ -f "$FAKEIP_WHITELIST_FILE" ] \
+       && [ -n "$_fp_summary_count" ] \
+       && [ "$_fp_summary_count" = "${existing_auto_count:-0}" ]; then
+        msg "Auto fakeip whitelist sources unchanged, skipping regeneration"
+        return 0
+    fi
 
-    local auto_entries tmp_auto
+    # Run generate_fakeip_whitelist_auto with stdout redirected — NOT via
+    # command substitution. The latter would fork a subshell and discard
+    # AUTO_FAKEIP_SOURCES, breaking the # Sources: header and log lines.
+    local auto_entries tmp_auto summary_backup
+    summary_backup="/tmp/clash/fakeip_whitelist_summary_backup.$$"
     tmp_auto="/tmp/clash/clash_autowl_stdout.$$"
     mkdir -p /tmp/clash
+    if [ -f "$FAKEIP_WHITELIST_SUMMARY_FILE" ]; then
+        cp -p "$FAKEIP_WHITELIST_SUMMARY_FILE" "$summary_backup" 2>/dev/null || rm -f "$summary_backup"
+    fi
     : > "$tmp_auto"
     generate_fakeip_whitelist_auto > "$tmp_auto"
     auto_entries=$(cat "$tmp_auto" 2>/dev/null)
     rm -f "$tmp_auto"
 
     if [ "$AUTO_FAKEIP_INCOMPLETE" = "true" ] && [ "${existing_auto_count:-0}" -gt 0 ]; then
+        if [ -f "$summary_backup" ]; then
+            mv -f "$summary_backup" "$FAKEIP_WHITELIST_SUMMARY_FILE"
+        else
+            rm -f "$FAKEIP_WHITELIST_SUMMARY_FILE"
+        fi
         msg "WARNING: Auto fakeip whitelist generation incomplete; keeping existing generated block ($existing_auto_count entries)"
         return 0
     fi
+    rm -f "$summary_backup"
 
     mkdir -p "$(dirname "$FAKEIP_WHITELIST_FILE")" 2>/dev/null
 
@@ -2538,7 +3644,6 @@ refresh_fakeip_whitelist_file() {
     if [ -n "$auto_entries" ]; then
         count=$(echo "$auto_entries" | wc -l | xargs)
     fi
-
     # Build the candidate on tmpfs — avoids writing a full .tmp next to the
     # whitelist on overlay every run when content ends up unchanged (cmp below).
     mkdir -p /tmp/clash 2>/dev/null
@@ -2617,6 +3722,12 @@ update_fakeip_whitelist_sets() {
     FAKE_IP_FILTER_MODE="$fake_ip_filter_mode"
     refresh_fakeip_whitelist_file
     FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
+    # The generator writes only files and logger summaries.  Keep any
+    # accidental stdout from nested provider converters out of SSH output.
+    generate_grouped_port_sources >/dev/null || {
+        warn "Grouped IP-CIDR rule generation failed; refusing to update the active whitelist set"
+        return 1
+    }
 
     # Skip nft/ipset flush+repopulate when the normalized CIDR list matches what
     # we last applied (digest in tmpfs). Saves kernel work; digest is cleared on
@@ -2699,20 +3810,20 @@ tun_route_reset_rule() {
     local table="$2"
     local pref="$3"
     # Keep a single deterministic rule entry: drop all duplicates and re-add one.
-    while ip rule del fwmark "$mark" table "$table" 2>/dev/null; do :; done
-    ip rule add pref "$pref" fwmark "$mark" table "$table" 2>/dev/null
+    while ip rule del pref "$pref" fwmark "$mark" table "$table" 2>/dev/null; do :; done
+    ip rule add pref "$pref" fwmark "$mark" table "$table" 2>/dev/null || return 1
 }
 
 tun_route_ensure_policy_state() {
     case "$PROXY_MODE" in
         "tun")
             tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY"
-            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null
+            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
             ;;
         "mixed")
             tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY"
             tun_route_reset_rule "$MARK_TUN_UDP" "$TABLE_TUN_UDP" "$PREF_TUN_UDP"
-            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null
+            ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
             ;;
     esac
 }
@@ -2721,16 +3832,16 @@ tun_route_setup() {
     load_all_settings_once
     case "$PROXY_MODE" in
         "tun")
-            tun_route_ensure_policy_state
+            tun_route_ensure_policy_state || return 1
             ip route replace default dev clash-tun table "$TABLE_TPROXY" 2>/dev/null && \
                 msg "TUN policy routing restored: fwmark $MARK_TPROXY → table $TABLE_TPROXY (default via clash-tun)" || \
-                msg "WARNING: Failed to restore TUN route (clash-tun may not be up yet)"
+                { msg "ERROR: Failed to restore TUN route (clash-tun is not ready)"; return 1; }
             ;;
         "mixed")
-            tun_route_ensure_policy_state
+            tun_route_ensure_policy_state || return 1
             ip route replace default dev clash-tun table "$TABLE_TUN_UDP" 2>/dev/null && \
                 msg "MIXED UDP policy routing restored: fwmark $MARK_TUN_UDP → table $TABLE_TUN_UDP (default via clash-tun)" || \
-                msg "WARNING: Failed to restore MIXED UDP route (clash-tun may not be up yet)"
+                { msg "ERROR: Failed to restore MIXED UDP route (clash-tun is not ready)"; return 1; }
             ;;
         *)
             msg "tun_route_setup: nothing to do for proxy mode '$PROXY_MODE'"
@@ -2870,6 +3981,10 @@ start() {
     if is_ipcidr_whitelist_mode; then
         refresh_fakeip_whitelist_file
         FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
+        generate_grouped_port_sources >/dev/null || {
+            warn "Grouped IP-CIDR rule generation failed; refusing to start with an incomplete firewall policy"
+            return 1
+        }
         if [ -n "$FAKEIP_WHITELIST_IPS" ]; then
             msg "Loaded fakeip whitelist: $(echo "$FAKEIP_WHITELIST_IPS" | wc -l | xargs) IP/CIDR entries from $FAKEIP_WHITELIST_FILE (mode: $FAKE_IP_FILTER_MODE)"
         else
@@ -2914,7 +4029,12 @@ start() {
     if hash nft 2>/dev/null; then
         msg "Using nftables for traffic redirection"
         if apply_nft_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
-            setup_routing_rules
+            setup_routing_rules || {
+                warn "Policy-routing setup failed; rolling back nftables rules"
+                teardown_routing_rules
+                rollback_nft_rules ""
+                return 1
+            }
         else
             msg "ERROR: Failed to apply nftables rules"
             return 1
@@ -2922,7 +4042,12 @@ start() {
     elif hash iptables 2>/dev/null; then
         msg "Using iptables for traffic redirection"
         if apply_iptables_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
-            setup_routing_rules
+            setup_routing_rules || {
+                warn "Policy-routing setup failed; rolling back iptables rules"
+                teardown_routing_rules
+                rollback_iptables_rules ""
+                return 1
+            }
         else
             msg "ERROR: Failed to apply iptables rules"
             return 1
@@ -3013,15 +4138,42 @@ case "$1" in
         start
         ;;
     update)
-        providers_exist=$(extract_proxy_providers)
-        if [ -z "$providers_exist" ]; then
-            msg "No proxy-providers configured, nothing to update."
-            exit 0
-        fi
+        acquire_update_lock || exit 0
+        old_grouped_digest=""
+        [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && old_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
         update_rules
+        update_rc=$?
+        if [ "$update_rc" -eq 0 ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
+            new_grouped_digest=""
+            [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+            if [ -n "$new_grouped_digest" ] && [ "$new_grouped_digest" != "$old_grouped_digest" ]; then
+                if hash nft 2>/dev/null; then
+                    msg "Grouped fakeip sources changed, rebuilding nftables rules"
+                    # update_rules() refreshes grouped CIDR sources/digest before
+                    # this point. Invalidate the old batch so start() cannot take
+                    # the digest fast-path and apply a batch built from old data.
+                    rm -f /tmp/clash/fakeip_port_groups.nft
+                    start || update_rc=$?
+                else
+                    msg "Grouped fakeip sources changed; nftables is unavailable, skipping grouped-rule rebuild"
+                fi
+            else
+                msg "Grouped fakeip sources unchanged, keeping active nftables rules"
+            fi
+        fi
+        release_update_lock
+        exit "$update_rc"
         ;;
     update-ip-whitelist)
+        acquire_update_lock || exit 0
         update_fakeip_whitelist_sets
+        update_rc=$?
+        release_update_lock
+        exit "$update_rc"
+        ;;
+    rule-providers-ready)
+        rule_provider_files_ready
+        exit $?
         ;;
     tun_route_setup)
         tun_route_setup
@@ -3069,7 +4221,7 @@ case "$1" in
         exit $?
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|update|update-ip-whitelist|tun_route_setup|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
+        echo "Usage: $0 {start|stop|restart|update|update-ip-whitelist|rule-providers-ready|tun_route_setup|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
         exit 1
         ;;
 esac

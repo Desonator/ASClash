@@ -17,10 +17,160 @@ msgid "Settings"
 msgstr "Настройки"
 
 msgid "Rulesets"
-msgstr "Списки правил"
+msgstr "Статус"
+
+msgid "Status"
+msgstr "Статус"
 
 msgid "Log"
 msgstr "Журнал"
+
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+msgid "Read-only overview of parser output and active network state."
+msgstr "Сводка результатов парсеров и текущего состояния сети. Только чтение."
+
+msgid "Refresh diagnostics"
+msgstr "Обновить диагностику"
+
+msgid "Overall status"
+msgstr "Общее состояние"
+
+msgid "Firewall table"
+msgstr "Таблица firewall"
+
+msgid "Present"
+msgstr "Обнаружена"
+
+msgid "Missing / unreadable"
+msgstr "Отсутствует или недоступна"
+
+msgid "Policy routing"
+msgstr "Policy routing"
+
+msgid "Rules found"
+msgstr "Правила найдены"
+
+msgid "Expected rules not found"
+msgstr "Ожидаемые правила не найдены"
+
+msgid "Rules and routes found"
+msgstr "Правила и маршруты найдены"
+
+msgid "Expected rules or routes not found"
+msgstr "Ожидаемые правила или маршруты не найдены"
+
+msgid "Grouped parser"
+msgstr "Парсер grouped AND"
+
+msgid "Generated batch available"
+msgstr "Пакет правил сформирован"
+
+msgid "No generated batch"
+msgstr "Пакет правил не сформирован"
+
+msgid "Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s"
+msgstr "Проверка только для чтения: служба не перезапускается, firewall и маршрутизация не изменяются. Последняя проверка: %s"
+
+msgid "Fake-IP whitelist parser"
+msgstr "Парсер fake-IP whitelist"
+
+msgid "Generated entries: "
+msgstr "Сформировано записей: "
+
+msgid "Rule provider"
+msgstr "Rule-provider"
+
+msgid "No provider statistics available."
+msgstr "Статистика provider-ов недоступна."
+
+msgid "Grouped AND rules"
+msgstr "Сгруппированные AND-правила"
+
+msgid "Matched conditions"
+msgstr "Условия"
+
+msgid "CIDR entries: "
+msgstr "Записей CIDR: "
+
+msgid "Generation stats: "
+msgstr "По данным генератора: "
+
+msgid "Accepted by parser: "
+msgstr "Принято парсером: "
+
+msgid "Skipped by parser: "
+msgstr "Пропущено парсером: "
+
+msgid "Skip reason"
+msgstr "Причина пропуска"
+
+msgid "Count"
+msgstr "Количество"
+
+msgid "Example rule"
+msgstr "Пример правила"
+
+msgid "Malformed rule or missing action"
+msgstr "Некорректное правило или отсутствует действие"
+
+msgid "Missing action"
+msgstr "Не указано действие"
+
+msgid "No supported IP-CIDR or RULE-SET operand"
+msgstr "Нет поддерживаемого операнда IP-CIDR или RULE-SET"
+
+msgid "Unsupported or multiple NETWORK conditions"
+msgstr "Неподдерживаемое или несколько условий NETWORK"
+
+msgid "Missing or multiple DST-PORT conditions"
+msgstr "Отсутствует DST-PORT или указано несколько условий"
+
+msgid "Empty DST-PORT condition"
+msgstr "Пустое условие DST-PORT"
+
+msgid "Ignored action: %s"
+msgstr "Игнорируемое действие: %s"
+
+msgid "Generated CIDRs: "
+msgstr "Сформировано CIDR: "
+
+msgid "No grouped rules generated."
+msgstr "Сгруппированные правила не сформированы."
+
+msgid "Counts are per provider and generated set; overlapping addresses across different providers are intentionally not deduplicated."
+msgstr "Подсчёт ведётся отдельно для каждого provider и набора; пересекающиеся адреса разных provider-ов намеренно не дедуплицируются."
+
+msgid "Firewall and policy routing"
+msgstr "Firewall и policy routing"
+
+msgid "Firewall chains and policy routing"
+msgstr "Цепочки firewall и policy routing"
+
+msgid "ip rule"
+msgstr "Правила ip rule"
+
+msgid "Routing table 100"
+msgstr "Таблица маршрутизации 100"
+
+msgid "Routing table 101"
+msgstr "Таблица маршрутизации 101"
+
+msgid "No output"
+msgstr "Нет вывода"
+
+msgid "Empty"
+msgstr "Пуста"
+
+msgid "Parser and firewall messages"
+msgstr "Сообщения парсера и firewall"
+
+msgid "Recent matching log lines are shown for troubleshooting. This is not a complete history; the system log buffer may rotate."
+msgstr "Для диагностики показаны последние подходящие строки журнала. Это не полная история: буфер системного журнала может ротироваться."
+
+msgid "No parser or firewall warnings found in the current system log buffer."
+msgstr "В текущем буфере системного журнала предупреждений парсера или firewall не найдено."
 
 ### Общие строки ###
 
@@ -64,6 +214,57 @@ msgstr "Clash запущен"
 
 msgid "Clash stopped"
 msgstr "Clash остановлен"
+
+msgid "Service is running"
+msgstr "Служба запущена"
+
+msgid "Service is stopped"
+msgstr "Служба остановлена"
+
+msgid "Kernel process is running"
+msgstr "Ядро запущено"
+
+msgid "Kernel process is stopped"
+msgstr "Ядро остановлено"
+
+msgid "Could not determine system architecture; falling back to amd64."
+msgstr "Не удалось определить архитектуру системы; используется amd64."
+
+msgid "Invalid GitHub repository. Use owner/repository format."
+msgstr "Некорректный репозиторий GitHub. Используйте формат владелец/репозиторий."
+
+msgid "Downloading Mihomo kernel..."
+msgstr "Загрузка ядра Mihomo..."
+
+msgid "Download failed"
+msgstr "Не удалось скачать файл."
+
+msgid "Extraction failed"
+msgstr "Не удалось распаковать файл."
+
+msgid "Failed to install new binary"
+msgstr "Не удалось установить новый исполняемый файл."
+
+msgid "Failed to set executable permissions"
+msgstr "Не удалось установить права на запуск файла."
+
+msgid "Installed binary failed its version check"
+msgstr "Не удалось проверить версию установленного ядра."
+
+msgid "Kernel installed. The Clash service was stopped; restart it to activate the new version."
+msgstr "Ядро установлено. Служба Clash остановлена; перезапустите её, чтобы активировать новую версию."
+
+msgid "Checking kernel status..."
+msgstr "Проверка состояния ядра..."
+
+msgid "Failed to check kernel status: %s"
+msgstr "Не удалось проверить состояние ядра: %s"
+
+msgid "Failed to check kernel status"
+msgstr "Не удалось проверить состояние ядра"
+
+msgid "No compatible binary found for architecture %s in %s"
+msgstr "Для архитектуры %s не найдено совместимое ядро в релизе %s."
 
 msgid "Clash Configuration"
 msgstr "Конфигурация Clash"
@@ -156,7 +357,7 @@ msgstr "Ошибка выполнения logread:"
 msgid "Error reading logs: %s"
 msgstr "Ошибка чтения логов: %s"
 
-### Модуль rulesets.js ###
+### Модуль status.js ###
 
 msgid "Local Rulesets"
 msgstr "Локальные списки правил"
@@ -283,8 +484,95 @@ msgstr "Прочие интерфейсы"
 msgid "Mihomo Kernel Management"
 msgstr "Управление ядром Mihomo"
 
+msgid "Smart group weights"
+msgstr "Вес Smart-групп"
+
+msgid "FAQ"
+msgstr "FAQ"
+
+msgid "No grouped rules found."
+msgstr "Сгруппированные правила не найдены."
+
+msgid "Shows unique nodes and their current Smart ranking and weights, grouped by Smart proxy group."
+msgstr "Показывает уникальные узлы, их текущий рейтинг и вес отдельно для каждой Smart-группы."
+
+msgid "Nodes are unique within each Smart group. Border and weight color: 0 is red, 50 yellow, 100 green."
+msgstr "Внутри каждой Smart-группы узлы не дублируются. Цвет рамки и значения веса: 0 — красный, 50 — жёлтый, 100 — зелёный."
+
+msgid "Refresh Smart weights"
+msgstr "Обновить веса Smart-групп"
+
+msgid "Could not read the configuration to detect Smart groups."
+msgstr "Не удалось прочитать конфигурацию и определить Smart-группы."
+
+msgid "Smart group is disabled in the configuration: no proxy group with type: smart was found."
+msgstr "Smart-группа отключена: в конфигурации не найдена proxy-группа с type: smart."
+
+msgid "Loading Smart weights..."
+msgstr "Загрузка весов Smart-групп..."
+
+msgid "Smart weights API request failed."
+msgstr "Не удалось получить данные из API Smart-групп."
+
+msgid "Smart weights API returned invalid JSON."
+msgstr "API Smart-групп вернул некорректный JSON."
+
+msgid "Smart group: %s"
+msgstr "Smart-группа: %s"
+
+msgid "Could not load Smart weights: %s"
+msgstr "Не удалось загрузить веса Smart-группы: %s"
+
+msgid "No Smart weight data is available for this group yet."
+msgstr "Для этой Smart-группы пока нет данных о весах."
+
+msgid "Smart API controller is not configured."
+msgstr "В конфигурации не задан адрес API контроллера Smart."
+
+msgid "Summary statistics were stale; total was recovered from the generated AUTO block."
+msgstr "Статистика summary-файла устарела; общее число восстановлено по AUTO-блоку списка."
+
+msgid "IP-CIDR entries exist, but provider statistics are unavailable."
+msgstr "Записи IP-CIDR найдены, но статистика по provider-ам недоступна."
+
+msgid "Server"
+msgstr "Сервер"
+
+msgid "Rank"
+msgstr "Ранг"
+
+msgid "Weight"
+msgstr "Вес"
+
 msgid "Download and manage the Mihomo (Clash Meta) kernel binary."
 msgstr "Загрузка и управление исполняемым файлом ядра Mihomo (Clash Meta)."
+
+msgid "Release source"
+msgstr "Источник релизов"
+
+msgid "Official Mihomo"
+msgstr "Официальный Mihomo"
+
+msgid "Custom GitHub release"
+msgstr "Свой релиз GitHub"
+
+msgid "Save release source"
+msgstr "Сохранить источник"
+
+msgid "Enter a GitHub repository as owner/repository."
+msgstr "Укажите репозиторий GitHub в формате владелец/репозиторий."
+
+msgid "Release source saved: %s"
+msgstr "Источник релизов сохранён: %s"
+
+msgid "Failed to save release source: %s"
+msgstr "Не удалось сохранить источник релизов: %s"
+
+msgid "Invalid GitHub repository. Use owner/repo format."
+msgstr "Некорректный репозиторий GitHub. Используйте формат владелец/репозиторий."
+
+msgid "No compatible .gz binary found for architecture %s in %s"
+msgstr "Для архитектуры %s в репозитории %s не найден совместимый .gz-файл"
 
 msgid "Interface Processing Mode"
 msgstr "Режим обработки интерфейсов"
@@ -327,6 +615,12 @@ msgstr "Автоматическое определение интерфейсо
 
 msgid "Additional Settings"
 msgstr "Дополнительные настройки"
+
+msgid "Show Smart group weights"
+msgstr "Показывать веса Smart-групп"
+
+msgid "The core must support proxy groups with type: smart. If unsupported, this widget will be hidden on the Status page."
+msgstr "Ядро должно поддерживать группы прокси типа smart. Если поддержки нет, этот блок будет скрыт на странице «Статус»."
 
 msgid "Exclude Mode (Universal approach)"
 msgstr "Режим исключения (универсальный)"
@@ -641,4 +935,46 @@ msgstr "Поддержать"
 
 msgid "Support the author"
 msgstr "Поддержать автора"
+
+msgid "Loading..."
+msgstr "Загрузка..."
+
+msgid "Provider"
+msgstr "Провайдер"
+
+msgid "CIDR entries"
+msgstr "Записей CIDR"
+
+msgid "FIREWALL"
+msgstr "ФАЙРВОЛ"
+
+msgid "IP-CIDR list without conditions"
+msgstr "Список IP-CIDR без условий"
+
+msgid "This list is used by the firewall (nftables/iptables) to mark traffic to the listed subnets when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "Этот список используется файрволом (nftables/iptables) для маркировки трафика к указанным подсетям при fake-ip-filter-mode «whitelist» или «rule». Изменения применяются сразу без перезапуска Mihomo."
+
+msgid "This block is generated automatically from IP-CIDR entries in providers referenced by non-DIRECT rules. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration or provider data changes."
+msgstr "Этот блок автоматически формируется из записей IP-CIDR provider-ов, на которые ссылаются правила не DIRECT. Он обновляется при запуске службы и каждом обновлении clash-rules (раз в 30 минут), только если изменились конфигурация или данные provider-ов."
+
+msgid "Total IP-CIDR entries"
+msgstr "Всего записей IP-CIDR"
+
+msgid "No data available."
+msgstr "Нет данных."
+
+msgid "Network"
+msgstr "Сеть"
+
+msgid "Destination ports"
+msgstr "Порты назначения"
+
+msgid "IP-CIDR list with AND conditions"
+msgstr "Список IP-CIDR с AND-условиями"
+
+msgid "This list is used by nftables to mark traffic to subnets matching the conditions when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "Этот список используется nftables для маркировки трафика к подсетям, подходящим под условия, при fake-ip-filter-mode «whitelist» или «rule». Изменения применяются сразу без перезапуска Mihomo."
+
+msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
+msgstr "Этот блок автоматически формируется из IP-CIDR в AND-правилах — напрямую или через provider-ы, на которые ссылаются правила не DIRECT. Записи загружаются в отдельные наборы IPv4 nftables; диапазоны портов и транспорт сохраняются, а не разворачиваются в пары IP/порт. Блок обновляется при запуске службы и каждом обновлении clash-rules (раз в 30 минут), только если изменились конфигурация, правила или данные provider-ов."
 

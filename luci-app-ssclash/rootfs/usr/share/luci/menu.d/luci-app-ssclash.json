@@ -3,7 +3,7 @@
 		"title": "SSClash",
 		"action": {
 			"type": "alias",
-			"path": "admin/services/ssclash/config"
+			"path": "admin/services/ssclash/status"
 		},
 		"depends": {
 			"acl": [ "luci-app-ssclash" ]
@@ -26,12 +26,20 @@
 			"path": "ssclash/settings"
 		}
 	},
-	"admin/services/ssclash/rulesets": {
-		"title": "Rulesets",
+	"admin/services/ssclash/diagnostics": {
+		"title": "Diagnostics",
 		"order": 30,
 		"action": {
 			"type": "view",
-			"path": "ssclash/rulesets"
+			"path": "ssclash/diagnostics"
+		}
+	},
+	"admin/services/ssclash/status": {
+		"title": "Status",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "ssclash/status"
 		}
 	},
 	"admin/services/ssclash/log": {

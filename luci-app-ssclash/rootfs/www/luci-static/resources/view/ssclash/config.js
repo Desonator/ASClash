@@ -58,6 +58,39 @@ function parseYamlValue(yaml, key) {
     return m ? m[2].trim() : null;
 }
 
+async function getConfigValidatorInfo() {
+    let selectedRepo = 'MetaCubeX/mihomo';
+    let coreOutput = '';
+    try {
+        const settings = await L.resolveDefault(fs.read('/opt/clash/settings'), '');
+        const match = settings.match(/^MIHOMO_RELEASE_REPO=([^\r\n]+)$/m);
+        if (match && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(match[1].trim()))
+            selectedRepo = match[1].trim();
+    } catch (_e) {}
+    try {
+        const result = await fs.exec('/opt/clash/bin/clash', ['-v']);
+        coreOutput = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+    } catch (_e) {}
+
+    const isPrizrakBinary = /prizrak[- ]core/i.test(coreOutput);
+    // Some Prizrak-Core builds report the upstream "Mihomo Meta" name from
+    // -v. The saved release repository is therefore also an explicit source
+    // marker for identifying the installed custom core, as requested.
+    const isPrizrakSource = /prizrak-core/i.test(selectedRepo);
+    const isPrizrak = isPrizrakSource || isPrizrakBinary;
+    const versionMatch = coreOutput.match(/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/i);
+    const coreName = isPrizrakSource ? 'Prizrak-Core (configured source)' : (isPrizrakBinary ? 'Prizrak-Core' : 'Mihomo');
+    const expectedPrizrak = isPrizrakSource;
+    return {
+        selectedRepo,
+        installedName: coreName,
+        installedVersion: versionMatch ? versionMatch[0] : '',
+        isPrizrak,
+        sourceMismatch: !expectedPrizrak && isPrizrakBinary,
+        detected: !!coreOutput
+    };
+}
+
 function normalizeHostPortFromAddr(addr, fallbackHost, fallbackPort) {
     if (!addr) return { host: fallbackHost, port: fallbackPort };
     const cleaned = addr.replace(/["']/g, '').trim();
@@ -192,6 +225,35 @@ return view.extend({
     },
     render: async function(config) {
         const running = await getServiceStatus();
+        const validatorInfo = await getConfigValidatorInfo();
+        const isRussianUI = String((L.env && L.env.lang) || document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('ru');
+        const validatorNoticeContent = [
+            E('div', {}, [
+                E('strong', {}, isRussianUI ? 'Проверяющее ядро: ' : 'Validator core: '),
+                validatorInfo.detected
+                    ? `${validatorInfo.installedName}${validatorInfo.installedVersion ? ' ' + validatorInfo.installedVersion : ''}`
+                    : (isRussianUI ? 'не удалось определить' : 'could not detect')
+            ]),
+            E('div', { 'style': 'margin-top: 3px;' }, [
+                E('strong', {}, isRussianUI ? 'Источник для следующей загрузки: ' : 'Source for the next download: '),
+                validatorInfo.selectedRepo
+            ]),
+        ];
+        if (validatorInfo.sourceMismatch) {
+            validatorNoticeContent.push(E('div', { 'style': 'margin-top: 4px; color: #b07800; font-weight: 600;' },
+                isRussianUI
+                    ? (validatorInfo.isPrizrak
+                        ? 'Выбран официальный Mihomo, но сейчас установлено Prizrak-Core. Валидатор всё равно использует установленный Prizrak-Core.'
+                        : 'Выбран Prizrak-Core, но сейчас установлено не это ядро. Специальные параметры Prizrak-Core пройдут проверку только после установки Prizrak-Core.')
+                    : (validatorInfo.isPrizrak
+                        ? 'Official Mihomo is selected, but Prizrak-Core is installed. Validation still uses the installed Prizrak-Core binary.'
+                        : 'Prizrak-Core is selected, but it is not installed. Prizrak-Core-only options can validate only after installing Prizrak-Core.')
+            ));
+        }
+        const validatorNotice = E('div', {
+            'class': 'cbi-section-descr',
+            'style': 'margin: 8px 0 14px; padding: 9px 12px; border-left: 3px solid ' + (validatorInfo.sourceMismatch ? '#e0a800' : '#1684d6') + '; background: rgba(127,127,127,0.08);'
+        }, validatorNoticeContent);
 
         const writeAndTestConfig = async function() {
             const value = editor.getValue().trim() + '\n';
@@ -401,6 +463,7 @@ return view.extend({
             ]),
             E('h2', _('Clash Configuration')),
             E('p', { 'class': 'cbi-section-descr' }, _('Your current Clash config. When applied, the changes will be saved and the service will be restarted.')),
+            validatorNotice,
             E('div', {
                 'id': 'editor',
                 'style': 'width: 100%; height: 640px; margin-bottom: 15px;'
@@ -419,7 +482,7 @@ return view.extend({
 
             const latest = await getLatestSSClashRelease();
             if (!latest) {
-                status.textContent = _('update check failed');
+                status.textContent = _('Update check failed');
                 return;
             }
 

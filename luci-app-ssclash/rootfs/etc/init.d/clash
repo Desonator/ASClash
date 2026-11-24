@@ -33,8 +33,9 @@ check_files() {
 		return 1
 	fi
 
-	if [ ! -f "$CLASH_RULES" ]; then
-		msg "WARNING: Clash rules script not found at $CLASH_RULES"
+	if [ ! -x "$CLASH_RULES" ]; then
+		msg "ERROR: Clash rules script missing or not executable at $CLASH_RULES"
+		return 1
 	fi
 
 	return 0
@@ -65,8 +66,21 @@ setup_clash_directories() {
 			msg "Created directory '$RULESET_TMPFS'"
 		fi
 
-		if [ ! -L "$RULESET_LINK" ] || [ "$(readlink "$RULESET_LINK")" != "$RULESET_TMPFS" ]; then
-			rm -rf "$RULESET_LINK"
+		if [ -L "$RULESET_LINK" ] && [ "$(readlink "$RULESET_LINK")" != "$RULESET_TMPFS" ]; then
+			if [ -d "$RULESET_LINK" ] && ! cp -a "$RULESET_LINK/." "$RULESET_TMPFS/"; then
+				msg "ERROR: Failed to preserve data from the previous ruleset target"
+				return 1
+			fi
+			rm -f "$RULESET_LINK" || return 1
+		fi
+		if [ ! -L "$RULESET_LINK" ]; then
+			if [ -e "$RULESET_LINK" ]; then
+				if [ ! -d "$RULESET_LINK" ] || ! cp -a "$RULESET_LINK/." "$RULESET_TMPFS/"; then
+					msg "ERROR: Failed to preserve existing ruleset data while switching to tmpfs"
+					return 1
+				fi
+				rm -rf "$RULESET_LINK" || return 1
+			fi
 			if ! ln -s "$RULESET_TMPFS" "$RULESET_LINK"; then
 				msg "ERROR: Failed to create symlink from '$RULESET_TMPFS' to '$RULESET_LINK'"
 				return 1
@@ -83,8 +97,21 @@ setup_clash_directories() {
 			msg "Created directory '$PROXY_PROVIDERS_TMPFS'"
 		fi
 
-		if [ ! -L "$PROXY_PROVIDERS_LINK" ] || [ "$(readlink "$PROXY_PROVIDERS_LINK")" != "$PROXY_PROVIDERS_TMPFS" ]; then
-			rm -rf "$PROXY_PROVIDERS_LINK"
+		if [ -L "$PROXY_PROVIDERS_LINK" ] && [ "$(readlink "$PROXY_PROVIDERS_LINK")" != "$PROXY_PROVIDERS_TMPFS" ]; then
+			if [ -d "$PROXY_PROVIDERS_LINK" ] && ! cp -a "$PROXY_PROVIDERS_LINK/." "$PROXY_PROVIDERS_TMPFS/"; then
+				msg "ERROR: Failed to preserve data from the previous proxy-provider target"
+				return 1
+			fi
+			rm -f "$PROXY_PROVIDERS_LINK" || return 1
+		fi
+		if [ ! -L "$PROXY_PROVIDERS_LINK" ]; then
+			if [ -e "$PROXY_PROVIDERS_LINK" ]; then
+				if [ ! -d "$PROXY_PROVIDERS_LINK" ] || ! cp -a "$PROXY_PROVIDERS_LINK/." "$PROXY_PROVIDERS_TMPFS/"; then
+					msg "ERROR: Failed to preserve existing proxy-provider data while switching to tmpfs"
+					return 1
+				fi
+				rm -rf "$PROXY_PROVIDERS_LINK" || return 1
+			fi
 			if ! ln -s "$PROXY_PROVIDERS_TMPFS" "$PROXY_PROVIDERS_LINK"; then
 				msg "ERROR: Failed to create symlink from '$PROXY_PROVIDERS_TMPFS' to '$PROXY_PROVIDERS_LINK'"
 				return 1
@@ -94,7 +121,17 @@ setup_clash_directories() {
 	else
 		# Use persistent storage under CLASH_DIR without tmpfs or symlinks
 		if [ -L "$RULESET_LINK" ]; then
-			rm -f "$RULESET_LINK"
+			local ruleset_migration="$CLASH_DIR/.ruleset-migration.$$"
+			rm -rf "$ruleset_migration"
+			mkdir -p "$ruleset_migration" && cp -a "$RULESET_LINK/." "$ruleset_migration/" || {
+				rm -rf "$ruleset_migration"
+				msg "ERROR: Failed to preserve tmpfs ruleset data while switching to persistent storage"
+				return 1
+			}
+			rm -f "$RULESET_LINK" && mv "$ruleset_migration" "$RULESET_LINK" || {
+				msg "ERROR: Failed to switch ruleset storage to persistent directory"
+				return 1
+			}
 		fi
 		if [ ! -d "$RULESET_LINK" ]; then
 			if ! mkdir -p "$RULESET_LINK"; then
@@ -105,7 +142,17 @@ setup_clash_directories() {
 		fi
 
 		if [ -L "$PROXY_PROVIDERS_LINK" ]; then
-			rm -f "$PROXY_PROVIDERS_LINK"
+			local proxy_migration="$CLASH_DIR/.proxy-providers-migration.$$"
+			rm -rf "$proxy_migration"
+			mkdir -p "$proxy_migration" && cp -a "$PROXY_PROVIDERS_LINK/." "$proxy_migration/" || {
+				rm -rf "$proxy_migration"
+				msg "ERROR: Failed to preserve tmpfs proxy-provider data while switching to persistent storage"
+				return 1
+			}
+			rm -f "$PROXY_PROVIDERS_LINK" && mv "$proxy_migration" "$PROXY_PROVIDERS_LINK" || {
+				msg "ERROR: Failed to switch proxy-provider storage to persistent directory"
+				return 1
+			}
 		fi
 		if [ ! -d "$PROXY_PROVIDERS_LINK" ]; then
 			if ! mkdir -p "$PROXY_PROVIDERS_LINK"; then
@@ -212,7 +259,7 @@ restore_dns() {
 
 # Function to apply firewall rules
 apply_firewall_rules() {
-	if [ -f "$CLASH_RULES" ]; then
+	if [ -x "$CLASH_RULES" ]; then
 		if "$CLASH_RULES" start; then
 			msg "Firewall rules applied"
 			return 0
@@ -221,8 +268,8 @@ apply_firewall_rules() {
 			return 1
 		fi
 	else
-		msg "WARNING: Clash rules script not found, skipping firewall configuration"
-		return 0
+		msg "ERROR: Clash rules script missing or not executable; refusing to start without firewall configuration"
+		return 1
 	fi
 }
 
@@ -352,6 +399,26 @@ service_started() {
 			fi
 			;;
 	esac
+
+	# Firewall preparation in start_service() runs before procd launches Mihomo,
+	# so rule-provider files on the tmpfs-backed ruleset path may not exist yet.
+	# Wait up to 60 seconds for provider files, then refresh the derived sets.
+	# Run detached so this callback never delays procd; the WAN hook/cron can retry
+	# later if a provider is still unavailable at timeout.
+	if [ -x "$CLASH_RULES" ]; then
+		(
+			sleep 5
+			attempt=0
+			while [ "$attempt" -lt 30 ]; do
+				pgrep -f "$CLASH_BIN -d $CLASH_DIR" >/dev/null 2>&1 || exit 0
+				"$CLASH_RULES" rule-providers-ready >/dev/null 2>&1 && break
+				sleep 2
+				attempt=$((attempt + 1))
+			done
+			pgrep -f "$CLASH_BIN -d $CLASH_DIR" >/dev/null 2>&1 || exit 0
+			"$CLASH_RULES" update
+		) >/dev/null 2>&1 </dev/null &
+	fi
 }
 
 service_triggers() {

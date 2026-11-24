@@ -68,63 +68,39 @@ Download the SSClash package and install it.
 
 ```bash
 # OpenWrt >= 25:
-curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash-4.7.1-r1.apk -o /tmp/luci-app-ssclash-4.7.1-r1.apk
-apk add --allow-untrusted /tmp/luci-app-ssclash-4.7.1-r1.apk
+curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash-4.7.1-r33.apk -o /tmp/luci-app-ssclash-4.7.1-r33.apk
+apk add --allow-untrusted /tmp/luci-app-ssclash-4.7.1-r33.apk
 
 # OpenWrt < 25:
-curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash_4.7.1-r1_all.ipk -o /tmp/luci-app-ssclash_4.7.1-r1_all.ipk
-opkg install /tmp/luci-app-ssclash_4.7.1-r1_all.ipk
+curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash_4.7.1-r41_all.ipk -o /tmp/luci-app-ssclash_4.7.1-r41_all.ipk
+opkg install /tmp/luci-app-ssclash_4.7.1-r41_all.ipk
 
 rm /tmp/*.ipk /tmp/*.apk
 ```
 
-## Step 4: Automatic Mihomo Kernel Management
+## Step 4: Kernel management
 
-Go to **Settings** → **Mihomo Kernel Management** and click **Download Latest Kernel**. The system will:
+Open **Services → SSClash → Status → Mihomo Kernel Management**. The page detects
+the router architecture, checks the installed binary and can install the latest
+release from either the official `MetaCubeX/mihomo` repository or a custom
+GitHub repository (for example, `legiz-ru/Prizrak-Core`). Choose and save the
+release source before checking or installing its kernel. The installer selects
+the matching release asset, verifies the installed executable and reports the
+installed and latest versions. Restart the Clash service after an installation
+or update to start the new binary.
 
-- Automatically detect your router's architecture
-- Download the latest compatible Mihomo kernel
-- Install and configure it properly
-- Show kernel status and version information
+On a first package installation, the service is deliberately left disabled at
+boot so you can review/edit the example configuration before starting it. Start
+the service from LuCI (or enable it with `/etc/init.d/clash enable`) after the
+configuration is ready; subsequent boots will then start it automatically.
 
-**Important:** Restart the Clash service after kernel installation.
+The status badges periodically check the init service and the running
+`/opt/clash/bin/clash` process. The page refreshes when it detects a service or
+kernel transition. Configuration validation uses the selected core's
+capabilities; when using Prizrak-Core, the configured-source validator is used
+so Prizrak-specific configuration fields are not rejected by stock Mihomo.
 
-### Manual Kernel Installation (Optional)
-
-If you prefer manual installation, navigate to the `bin` directory and download the Clash.Meta Kernel:
-
-```bash
-cd /opt/clash/bin
-```
-
-For **amd64** architecture:
-
-```bash
-curl -L https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-amd64-compatible-v1.19.27.gz -o clash.gz
-```
-
-For **arm64** architecture:
-
-```bash
-curl -L https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-arm64-v1.19.27.gz -o clash.gz
-```
-
-For **mipsel_24kc** architecture:
-
-```bash
-curl -L https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-mipsle-softfloat-v1.19.27.gz -o clash.gz
-```
-
-Need a different architecture? Visit the [MetaCubeX Release Page](https://github.com/MetaCubeX/mihomo/releases) and choose the one that matches your device.
-
-Decompress and make executable:
-
-```bash
-gunzip clash.gz
-chmod +x clash
-```
-
-## Step 5: Configure Interface Processing Mode
+## Step 5: Configure traffic processing
 
 SSClash offers two interface processing modes:
 
@@ -147,6 +123,14 @@ SSClash offers two interface processing modes:
 - **Block QUIC traffic**: Blocks UDP port 443 to improve proxy effectiveness for services like YouTube
 - **Store rules and proxy providers in RAM**: rulesets and proxy-providers directories are placed on tmpfs to extend the lifespan of the NAND chip
 - **Add HWID headers to subscriptions**: Automatically adds HWID headers to proxy-providers (Remnawave compatibility)
+
+The service supports TPROXY, TUN and MIXED proxy modes. In MIXED mode, TCP is
+handled through TPROXY and UDP through TUN. TUN mode requires `/dev/net/tun` and
+the `kmod-tun` package; transparent proxy mode requires the matching TPROXY
+kernel module for the router's firewall stack. TUN/MIXED also install the
+necessary forwarding and policy-routing state for the `clash-tun` interface.
+The optional TUN stack (`system`, `gvisor` or `mixed`) is configured in the
+Mihomo YAML configuration.
 
 <p align="center">
  <img src=".github/assets/images/screenshots/scr-01.png" width="100%">
@@ -196,6 +180,111 @@ Access the Clash dashboard directly from the LuCI interface with automatic confi
  <img src=".github/assets/images/screenshots/scr-05.png" width="100%">
 </p>
 
+# Network behavior and generated IP-CIDR lists
+
+### Interface selection and traffic outside the proxy
+
+In **Exclude** interface mode, eligible traffic is processed except traffic on
+excluded interfaces (WAN is detected and excluded when automatic detection is
+enabled). In **Explicit** mode, only selected interfaces are processed. The
+firewall rules also bypass reserved/local networks, the router's own proxy
+servers, configured Clash ports and traffic already carrying routing marks, to
+avoid proxy loops. These firewall rules select which connections enter Mihomo;
+the final route/action for traffic that does enter the core remains governed by
+the Mihomo configuration and rule order.
+
+### Fake-IP whitelist (plain IP-CIDR list)
+
+When `dns.fake-ip-filter-mode` is `whitelist` or `rule`, the firewall can mark
+traffic to IPv4 addresses/subnets in `/opt/clash/lst/fakeip-whitelist-ipcidr.txt`.
+The LuCI status page shows provider counts and a FAQ for this list. The file
+supports manual entries and an auto-generated section delimited by
+`AUTO-BEGIN`/`AUTO-END`; manual content outside these markers is preserved.
+Automatic generation reads IPv4 `IP-CIDR` entries from providers referenced by
+non-`DIRECT`/non-`REJECT` rules and relevant `RULE-SET` entries in
+`dns.fake-ip-filter`, plus literal top-level `IP-CIDR` rules whose action is
+not `DIRECT`, `REJECT`, `REJECT-DROP` or `PASS`. Set `AUTO_FAKEIP_WHITELIST=false` in
+`/opt/clash/settings` to disable generation and manage the list manually.
+Changes are applied by the firewall without restarting Mihomo.
+
+In `whitelist` mode, only DNS matches selected by Mihomo receive fake IPs; in
+`rule` mode, `fake-ip-filter` is evaluated top-down and each match chooses
+`fake-ip` or `real-ip`. Fake-IP destinations are routed by the fake-IP range;
+real-IP destinations reach Mihomo only when matched by the generated/manual
+CIDR lists or other firewall rules. Arbitrary DNS answers for domain-only
+`real-ip` rules cannot be inferred into static IP sets, so they may bypass the
+core unless separately covered.
+
+### Grouped `AND` IP-CIDR rules (nftables only)
+
+For supported `AND` rules combining a provider or direct IPv4 `IP-CIDR` entries
+with `NETWORK` and/or `DST-PORT`, SSClash creates separate nftables IPv4 sets
+and applies compact protocol/port marking rules. Port ranges stay ranges; CIDRs
+are not expanded into IP/port pairs. This feature is nftables-only; grouped
+`AND` rules are not applied by the iptables backend. The status page reports
+providers, networks, destination ports and entry counts, and provides a FAQ.
+When an AND rule has several CIDR operands, the generated set contains their
+intersection, not their union. Rules whose final action is `DIRECT`, `REJECT`
+or `REJECT-DROP` are omitted from grouped firewall generation. Other actions
+are marked into Mihomo so its own rule engine can continue evaluating them.
+Identical resulting CIDR sets are shared across rules with different
+network/port conditions; those conditions remain separate nftables rules. The
+status table lists each provider once, combines its network/port conditions,
+and counts that provider's own unique CIDRs. The overall total counts each
+unique merged firewall set only once.
+Grouped rules process eligible transit traffic; router-originated traffic uses
+the separate output-chain policy and is intentionally not matched by these sets.
+
+Generation is enabled by default in the `clash-rules` configuration and has
+limits (`GROUPED_FAKEIP_MAX_GROUPS=32`,
+`GROUPED_FAKEIP_MAX_CIDRS=150000`). If a limit is exceeded, generation fails
+instead of applying an oversized generated batch. `GROUPED_FAKEIP_PORT_RULES_DRY_RUN=true`
+generates/validates without applying the grouped batch. Generated source and
+batch digests avoid unnecessary parsing and firewall changes; updates are
+serialized with a lock. Provider-derived data is refreshed after the core has
+started and its provider files become available, on WAN-up, and by the
+30-minute cron job installed with the package. Unchanged source data does not
+require a firewall rebuild.
+
+### Smart-group weights
+
+On the Status page, SSClash detects groups configured with `type: smart` and
+queries the core's external-controller API for their unique server weights.
+Each group is displayed separately; server cards are sorted by current weight
+and color-coded from red (low) through yellow to green (high). Weights refresh
+in the browser every 30 seconds while the page is visible. The section is
+omitted when there are no Smart groups or the core does not expose the required
+API. The LuCI backend requests the weights from the router, so the configured
+external controller must be reachable from the router. Configure its access
+secret if one is set.
+
+## Grouped `AND` rule example
+
+For example, this supported rule refers to an IP-CIDR provider and restricts
+the firewall mark to the specified UDP destination-port range:
+
+```yaml
+- AND,((RULE-SET,cloudflare-ip),(DST-PORT,80,443,2052,2053,2082,2083,2086,2087,2095,2096,8080,8443,8880)),Подсети IP-CIDR
+- AND,((RULE-SET,discord-voice),(NETWORK,udp),(DST-PORT,50000-50100)),Discord
+- AND,((IP-CIDR,186.157.42.56/32),(NETWORK,tcp),(DST-PORT,80,443,2050-2100,8080-8880)),Подсети IP-CIDR
+```
+
+The following settings in `/opt/clash/settings` control the generated batch
+(they do not replace Mihomo's own rule engine):
+
+```sh
+GROUPED_FAKEIP_PORT_RULES_ENABLED="true"
+GROUPED_FAKEIP_PORT_RULES_DRY_RUN="false"
+GROUPED_FAKEIP_MAX_GROUPS="32"
+GROUPED_FAKEIP_MAX_CIDRS="150000"
+```
+
+To syntax-check a generated batch without applying it, use:
+
+```sh
+nft -c -f /tmp/clash/fakeip_port_groups.nft
+```
+
 # Remove Clash
 
 To remove Clash completely:
@@ -206,6 +295,8 @@ apk del luci-app-ssclash
 
 # OpenWrt < 25:
 opkg remove luci-app-ssclash
-
-rm -rf /opt/clash
 ```
+
+Package removal does not require deleting `/opt/clash`. That directory contains
+the configuration, subscriptions and user data; remove it manually only if you
+intentionally want to erase those files.
