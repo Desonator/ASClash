@@ -1,0 +1,53 @@
+{
+	"admin/services/asclash": {
+		"title": "ASClash",
+		"action": {
+			"type": "alias",
+			"path": "admin/services/asclash/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-asclash" ]
+		},
+		"i18n": "asclash"
+	},
+	"admin/services/asclash/config": {
+		"title": "Configuration",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "asclash/config"
+		}
+	},
+	"admin/services/asclash/settings": {
+		"title": "Settings",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "asclash/settings"
+		}
+	},
+	"admin/services/asclash/diagnostics": {
+		"title": "Diagnostics",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "asclash/diagnostics"
+		}
+	},
+	"admin/services/asclash/status": {
+		"title": "Status",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "asclash/status"
+		}
+	},
+	"admin/services/asclash/log": {
+		"title": "Log",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "asclash/log"
+		}
+	}
+}

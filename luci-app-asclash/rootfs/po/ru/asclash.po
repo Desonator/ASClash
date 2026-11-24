@@ -1,0 +1,1010 @@
+# Russian translation for ASClash
+# Copyright (C) 2024-2025 ZeroChaos
+# This file is distributed under the same license as the package.
+#
+msgid ""
+msgstr ""
+"Language: ru\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+### Строки меню ###
+
+msgid "Configuration"
+msgstr "Конфигурация"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Rulesets"
+msgstr "Статус"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Log"
+msgstr "Журнал"
+
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+msgid "Read-only overview of parser output and active network state."
+msgstr "Сводка результатов парсеров и текущего состояния сети. Только чтение."
+
+msgid "Refresh diagnostics"
+msgstr "Обновить диагностику"
+
+msgid "Overall status"
+msgstr "Общее состояние"
+
+msgid "Firewall table"
+msgstr "Таблица firewall"
+
+msgid "Present"
+msgstr "Обнаружена"
+
+msgid "Missing / unreadable"
+msgstr "Отсутствует или недоступна"
+
+msgid "Policy routing"
+msgstr "Маршрутизация по политикам"
+
+msgid "Rules found"
+msgstr "Правила найдены"
+
+msgid "Expected rules not found"
+msgstr "Ожидаемые правила не найдены"
+
+msgid "Rules and routes found"
+msgstr "Правила и маршруты найдены"
+
+msgid "Expected rules or routes not found"
+msgstr "Ожидаемые правила или маршруты не найдены"
+
+msgid "Grouped parser"
+msgstr "Парсер сгруппированных AND-правил"
+
+msgid "Generated batch available"
+msgstr "Пакет правил сформирован"
+
+msgid "No generated batch"
+msgstr "Пакет правил не сформирован"
+
+msgid "Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s"
+msgstr "Проверка только для чтения: служба не перезапускается, firewall и маршрутизация не изменяются. Последняя проверка: %s"
+
+msgid "Fake-IP whitelist parser"
+msgstr "Парсер списка Fake-IP"
+
+msgid "Generated entries: "
+msgstr "Сформировано записей: "
+
+msgid "Providers: "
+msgstr "Провайдеров: "
+
+msgid "Rule provider"
+msgstr "Провайдер правил"
+
+msgid "No provider statistics available."
+msgstr "Статистика provider-ов недоступна."
+
+msgid "Grouped AND rules"
+msgstr "Сгруппированные AND-правила"
+
+msgid "Matched conditions"
+msgstr "Условия"
+
+msgid "CIDR entries: "
+msgstr "Записей CIDR: "
+
+msgid "Generation stats: "
+msgstr "По данным генератора: "
+
+msgid "Accepted by parser: "
+msgstr "Принято парсером: "
+
+msgid "Skipped by parser: "
+msgstr "Пропущено парсером: "
+
+msgid "Skip reason"
+msgstr "Причина пропуска"
+
+msgid "Count"
+msgstr "Количество"
+
+msgid "Example rule"
+msgstr "Пример правила"
+
+msgid "Malformed rule or missing action"
+msgstr "Некорректное правило или отсутствует действие"
+
+msgid "Missing action"
+msgstr "Не указано действие"
+
+msgid "No supported IP-CIDR or RULE-SET operand"
+msgstr "Нет поддерживаемого операнда IP-CIDR или RULE-SET"
+
+msgid "Unsupported or multiple NETWORK conditions"
+msgstr "Неподдерживаемое или несколько условий NETWORK"
+
+msgid "Missing or multiple DST-PORT conditions"
+msgstr "Отсутствует DST-PORT или указано несколько условий"
+
+msgid "Empty DST-PORT condition"
+msgstr "Пустое условие DST-PORT"
+
+msgid "Ignored action: %s"
+msgstr "Игнорируемое действие: %s"
+
+msgid "Generated CIDRs: "
+msgstr "Сформировано CIDR: "
+
+msgid "Generated sets: "
+msgstr "Сформировано наборов: "
+
+msgid "Unique nft sets: "
+msgstr "Уникальных наборов nftables: "
+
+msgid "Generated groups: "
+msgstr "Сформировано групп: "
+
+msgid "No AND rules were skipped by the parser."
+msgstr "Парсер не пропустил ни одного AND-правила."
+
+msgid "Parser diagnostics are not available because grouped rules are disabled or have not been generated yet."
+msgstr "Диагностика парсера недоступна: grouped-правила отключены или ещё не генерировались."
+
+msgid "Fake-IP whitelist provider \"%s\": file not found: %s (skipped)"
+msgstr "Провайдер списка Fake-IP «%s»: файл не найден: %s (пропущен)"
+
+msgid "Fake-IP whitelist provider \"%s\" is referenced but not defined (skipped)"
+msgstr "Провайдер списка Fake-IP «%s» указан в правилах, но не объявлен (пропущен)"
+
+msgid "Fake-IP whitelist provider \"%s\" could not be parsed: %s (skipped)"
+msgstr "Не удалось разобрать провайдер списка Fake-IP «%s»: %s (пропущен)"
+
+msgid "Auto fake-IP whitelist: referenced rule-providers could not be parsed."
+msgstr "Автосписок Fake-IP: не удалось разобрать указанные rule-providers."
+
+msgid "No grouped rules generated."
+msgstr "Сгруппированные правила не сформированы."
+
+msgid "Counts are per provider and generated set; overlapping addresses across different providers are intentionally not deduplicated."
+msgstr "Подсчёт ведётся отдельно для каждого provider и набора; пересекающиеся адреса разных provider-ов намеренно не дедуплицируются."
+
+msgid "Firewall and policy routing"
+msgstr "Файрвол и маршрутизация по политикам"
+
+msgid "Firewall chains and policy routing"
+msgstr "Цепочки файрвола и маршрутизация по политикам"
+
+msgid "ip rule"
+msgstr "Правила ip rule"
+
+msgid "Routing table 100"
+msgstr "Таблица маршрутизации 100"
+
+msgid "Routing table 101"
+msgstr "Таблица маршрутизации 101"
+
+msgid "No output"
+msgstr "Нет вывода"
+
+msgid "Empty"
+msgstr "Пуста"
+
+msgid "Parser and firewall messages"
+msgstr "Сообщения парсера и firewall"
+
+msgid "Recent matching log lines are shown for troubleshooting. This is not a complete history; the system log buffer may rotate."
+msgstr "Для диагностики показаны последние подходящие строки журнала. Это не полная история: буфер системного журнала может ротироваться."
+
+msgid "No parser or firewall warnings found in the current system log buffer."
+msgstr "В текущем буфере системного журнала предупреждений парсера или firewall не найдено."
+
+### Общие строки ###
+
+msgid "Please wait"
+msgstr "Пожалуйста, подождите"
+
+msgid "Saving..."
+msgstr "Сохранение..."
+
+msgid "Deleting..."
+msgstr "Удаление..."
+
+msgid "Creating..."
+msgstr "Создание..."
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Create"
+msgstr "Создать"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Delete"
+msgstr "Удалить"
+
+### Модуль config.js ###
+
+msgid "Open Dashboard"
+msgstr "Открыть панель управления"
+
+msgid "Stop Service"
+msgstr "Остановить службу"
+
+msgid "Start Service"
+msgstr "Запустить службу"
+
+msgid "Clash is running"
+msgstr "Clash запущен"
+
+msgid "Clash stopped"
+msgstr "Clash остановлен"
+
+msgid "Service is running"
+msgstr "Служба запущена"
+
+msgid "Service is stopped"
+msgstr "Служба остановлена"
+
+msgid "Kernel process is running"
+msgstr "Ядро запущено"
+
+msgid "Kernel process is stopped"
+msgstr "Ядро остановлено"
+
+msgid "Could not determine system architecture; falling back to amd64."
+msgstr "Не удалось определить архитектуру системы; используется amd64."
+
+msgid "Invalid GitHub repository. Use owner/repository format."
+msgstr "Некорректный репозиторий GitHub. Используйте формат владелец/репозиторий."
+
+msgid "Downloading Mihomo kernel..."
+msgstr "Загрузка ядра Mihomo..."
+
+msgid "Download failed"
+msgstr "Не удалось скачать файл."
+
+msgid "Extraction failed"
+msgstr "Не удалось распаковать файл."
+
+msgid "Failed to install new binary"
+msgstr "Не удалось установить новый исполняемый файл."
+
+msgid "Failed to set executable permissions"
+msgstr "Не удалось установить права на запуск файла."
+
+msgid "Installed binary failed its version check"
+msgstr "Не удалось проверить версию установленного ядра."
+
+msgid "Kernel installed. The Clash service was stopped; restart it to activate the new version."
+msgstr "Ядро установлено. Служба Clash остановлена; перезапустите её, чтобы активировать новую версию."
+
+msgid "Checking kernel status..."
+msgstr "Проверка состояния ядра..."
+
+msgid "Failed to check kernel status: %s"
+msgstr "Не удалось проверить состояние ядра: %s"
+
+msgid "Failed to check kernel status"
+msgstr "Не удалось проверить состояние ядра"
+
+msgid "No compatible binary found for architecture %s in %s"
+msgstr "Для архитектуры %s не найдено совместимое ядро в релизе %s."
+
+msgid "Clash Configuration"
+msgstr "Конфигурация Clash"
+
+msgid "Your current Clash config. When applied, the changes will be saved and the service will be restarted."
+msgstr "Ваша текущая конфигурация Clash. При применении изменения будут сохранены, а служба перезапущена."
+
+msgid "Save & Restart core"
+msgstr "Сохранить и перезапустить ядро"
+
+msgid "Save & Reload config"
+msgstr "Сохранить и перезагрузить конфиг"
+
+msgid "More actions"
+msgstr "Другие действия"
+
+msgid "Unable to start and enable service: %s"
+msgstr "Не удалось запустить и включить службу: %s"
+
+msgid "Unable to stop and disable service: %s"
+msgstr "Не удалось остановить и отключить службу: %s"
+
+msgid "Popup was blocked. Please allow popups for this site."
+msgstr "Всплывающее окно заблокировано. Пожалуйста, разрешите всплывающие окна для этого сайта."
+
+msgid "Service is not running."
+msgstr "Служба не запущена."
+
+msgid "Error opening dashboard:"
+msgstr "Ошибка при открытии панели управления:"
+
+msgid "Failed to open dashboard: %s"
+msgstr "Не удалось открыть панель управления: %s"
+
+msgid "Configuration saved successfully."
+msgstr "Конфигурация успешно сохранена."
+
+msgid "Configuration test failed — service not reloaded. Please fix the errors below:"
+msgstr "Проверка конфигурации завершилась с ошибкой — служба не была перезагружена. Пожалуйста, исправьте следующие ошибки:"
+
+msgid "unknown error"
+msgstr "неизвестная ошибка"
+
+msgid "Service reloaded successfully."
+msgstr "Служба успешно перезагружена."
+
+msgid "Service is restarting…"
+msgstr "Служба перезапускается…"
+
+msgid "Service is still restarting — it may take longer on a slow connection. Reload the page in a moment to check its status."
+msgstr "Служба всё ещё перезапускается — на медленном соединении это может занять больше времени. Обновите страницу через несколько секунд, чтобы проверить её состояние."
+
+msgid "Unable to save contents: %s"
+msgstr "Не удалось сохранить содержимое: %s"
+
+### Модуль config.js — Reload config / Restart core ###
+
+msgid "Reload configuration via Mihomo API — active connections are preserved. Firewall rules are NOT rebuilt; use \"Save & Restart core\" when changing external-controller / tproxy-port / tun / fake-ip-filter-mode / proxy mode."
+msgstr "Перезагрузка конфигурации через API Mihomo — активные соединения сохраняются. Правила файрвола НЕ перестраиваются; используйте «Сохранить и перезапустить ядро» при изменении external-controller / tproxy-port / tun / fake-ip-filter-mode / режима проксирования."
+
+msgid "Full restart: stops and starts the Mihomo core, rebuilds firewall rules and refreshes subscription IPs. Active connections are dropped."
+msgstr "Полный перезапуск: останавливает и запускает ядро Mihomo, перестраивает правила файрвола и обновляет IP подписок. Активные соединения будут разорваны."
+
+msgid "Service is not running — config reload requires a running Mihomo instance. Use \"Save & Restart core\" instead."
+msgstr "Служба не запущена — для перезагрузки конфига нужен работающий Mihomo. Используйте «Сохранить и перезапустить ядро»."
+
+msgid "Config reload failed (%s, HTTP %s). %s Try \"Save & Restart core\" for a full restart."
+msgstr "Перезагрузка конфига не удалась (%s, HTTP %s). %s Попробуйте «Сохранить и перезапустить ядро» для полного перезапуска."
+
+msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)"
+msgstr "(Подсказка: системный curl не поддерживает HTTPS. Установите пакет curl-ssl или используйте обычный external-controller для перезагрузки конфига.)"
+
+msgid "Config reloaded, but updating subscription IP cache failed: %s"
+msgstr "Конфиг перезагружен, но обновление кеша IP подписок не удалось: %s"
+
+msgid "Config reloaded via Mihomo API — active connections preserved."
+msgstr "Конфиг перезагружен через API Mihomo — активные соединения сохранены."
+
+msgid "Config reload error: %s. Try \"Save & Restart core\" for a full restart."
+msgstr "Ошибка перезагрузки конфига: %s. Попробуйте «Сохранить и перезапустить ядро» для полного перезапуска."
+
+### Модуль log.js ###
+
+msgid "--- Log truncated, skipped %d older lines ---"
+msgstr "--- Лог урезан, пропущено %d старых строк ---"
+
+msgid "Error executing logread:"
+msgstr "Ошибка выполнения logread:"
+
+msgid "Error reading logs: %s"
+msgstr "Ошибка чтения логов: %s"
+
+### Модуль status.js ###
+
+msgid "Local Rulesets"
+msgstr "Локальные списки правил"
+
+msgid "Create New List"
+msgstr "Создать новый список"
+
+msgid "Here you can manage local lists for use in rule-providers."
+msgstr "Здесь вы можете управлять локальными списками для использования в rule-providers."
+
+msgid "No local lists yet. Click \"Create New List\" to add one."
+msgstr "Пока нет локальных списков. Нажмите «Создать новый список», чтобы добавить."
+
+msgid "%d entries"
+msgstr "записей: %d"
+
+msgid "Example usage in your config.yaml:"
+msgstr "Пример использования в вашем config.yaml:"
+
+msgid "Editor not initialized."
+msgstr "Редактор не инициализирован."
+
+msgid "List \"%s\" saved successfully."
+msgstr "Список \"%s\" успешно сохранен."
+
+msgid "Failed to save list \"%s\": %s"
+msgstr "Не удалось сохранить список \"%s\": %s"
+
+msgid "Delete Ruleset"
+msgstr "Удалить список правил"
+
+msgid "Are you sure you want to delete the list \"%s\"? This action cannot be undone."
+msgstr "Вы уверены, что хотите удалить список \"%s\"? Это действие необратимо."
+
+msgid "List \"%s\" has been deleted."
+msgstr "Список \"%s\" был удален."
+
+msgid "Failed to delete list \"%s\": %s"
+msgstr "Не удалось удалить список \"%s\": %s"
+
+msgid "Create New Ruleset"
+msgstr "Создать новый список правил"
+
+msgid "e.g., my-custom-list"
+msgstr "например, my-custom-list"
+
+msgid "Invalid name. Only letters, numbers, underscores, and hyphens are allowed."
+msgstr "Некорректное имя. Разрешены только буквы, цифры, знак подчеркивания и дефисы."
+
+msgid "List Name"
+msgstr "Имя списка"
+
+msgid "New list \"%s\" created."
+msgstr "Новый список \"%s\" создан."
+
+msgid "Failed to create list: %s"
+msgstr "Не удалось создать список: %s"
+
+msgid "Cannot read ruleset directory: %s"
+msgstr "Не удается прочитать директорию списков правил: %s"
+
+msgid "A list with this name already exists."
+msgstr "Список с таким именем уже существует."
+
+msgid "TECHNICAL"
+msgstr "ТЕХНИЧЕСКИЙ"
+
+msgid "IP-CIDR List (fake-ip whitelist/rule mode)"
+msgstr "Список IP-CIDR (режим fake-ip whitelist/rule)"
+
+msgid "This list is used by the firewall (nftables/iptables) to mark traffic to specified IPs and subnets for proxying when fake-ip-filter-mode is set to \"whitelist\" or \"rule\" (both modes leave part of the traffic on real IPs, which still needs to be proxied). Enter one IPv4 address or CIDR per line (e.g. 8.8.8.8 or 1.2.3.0/24). Lines starting with # are treated as comments. Saving applies changes immediately without restarting Mihomo."
+msgstr "Этот список используется файрволом (nftables/iptables) для маркировки трафика к указанным IP и подсетям для проксирования, когда fake-ip-filter-mode установлен в \"whitelist\" или \"rule\" (оба режима оставляют часть трафика на реальных IP, который всё равно нужно проксировать). Вводите по одному IPv4-адресу или CIDR на строку (например, 8.8.8.8 или 1.2.3.0/24). Строки, начинающиеся с #, считаются комментариями. Сохранение применяет изменения немедленно без перезапуска Mihomo."
+
+msgid "IP-CIDR whitelist saved and firewall rules updated."
+msgstr "Белый список IP-CIDR сохранён, правила файрвола обновлены."
+
+msgid "IP-CIDR whitelist saved, but firewall update failed: %s"
+msgstr "Белый список IP-CIDR сохранён, но обновление файрвола не удалось: %s"
+
+msgid "Failed to save IP-CIDR whitelist: %s"
+msgstr "Не удалось сохранить белый список IP-CIDR: %s"
+
+msgid "The block between # AUTO-BEGIN and # AUTO-END is generated automatically from IP-CIDR entries found in rule-providers referenced by non-DIRECT rules. In fake-ip-filter-mode: whitelist, dns.fake-ip-filter: RULE-SET:<name> entries (colon syntax) are merged as well. In fake-ip-filter-mode: rule, dns.fake-ip-filter: entries of the form RULE-SET,<name>,fake-ip are merged (Mihomo routing-style syntax for that mode; real-ip rows are ignored). It is refreshed on service start, on every clash-rules update (cron, every 30 min) and on \"Save\" / \"Regenerate now\". Edit only the area OUTSIDE the markers — everything inside will be overwritten. Set AUTO_FAKEIP_WHITELIST=false in /opt/clash/settings to disable auto-generation and manage the list by hand."
+msgstr "Блок между # AUTO-BEGIN и # AUTO-END формируется автоматически из записей IP-CIDR в rule-providers, на которые ссылаются правила с действием, отличным от DIRECT. В режиме fake-ip-filter-mode: whitelist к объединению добавляются записи dns.fake-ip-filter: вида RULE-SET:<имя> (синтаксис с двоеточием). В режиме fake-ip-filter-mode: rule учитываются строки dns.fake-ip-filter: вида RULE-SET,<имя>,fake-ip (синтаксис Mihomo для этого режима; строки с real-ip игнорируются). Он обновляется при старте службы, при каждом запуске clash-rules update (cron, раз в 30 минут) и при нажатии «Сохранить» / «Перегенерировать сейчас». Редактируйте только область ВНЕ маркеров — всё внутри будет перезаписано. Чтобы отключить авто-генерацию и вести список вручную, укажите AUTO_FAKEIP_WHITELIST=false в /opt/clash/settings."
+
+msgid "Regenerate now"
+msgstr "Перегенерировать сейчас"
+
+msgid "Regenerating..."
+msgstr "Перегенерация..."
+
+msgid "IP-CIDR whitelist regenerated from rule-providers."
+msgstr "Список IP-CIDR перегенерирован из rule-providers."
+
+msgid "Regeneration failed: %s"
+msgstr "Перегенерация не удалась: %s"
+
+msgid "Failed to regenerate IP-CIDR whitelist: %s"
+msgstr "Не удалось перегенерировать белый список IP-CIDR: %s"
+
+### Модуль settings.js ###
+
+msgid "WAN Interfaces"
+msgstr "WAN-интерфейсы"
+
+msgid "Ethernet Interfaces"
+msgstr "Ethernet-интерфейсы"
+
+msgid "WiFi Interfaces"
+msgstr "Wi-Fi интерфейсы"
+
+msgid "USB Interfaces"
+msgstr "USB-интерфейсы"
+
+msgid "VPN Interfaces"
+msgstr "VPN-интерфейсы"
+
+msgid "Virtual Interfaces"
+msgstr "Виртуальные интерфейсы"
+
+msgid "Other Interfaces"
+msgstr "Прочие интерфейсы"
+
+msgid "Mihomo Kernel Management"
+msgstr "Управление ядром Mihomo"
+
+msgid "Smart group weights"
+msgstr "Вес Smart-групп"
+
+msgid "FAQ"
+msgstr "FAQ"
+
+msgid "No grouped rules found."
+msgstr "Сгруппированные правила не найдены."
+
+msgid "Shows unique nodes and their current Smart ranking and weights, grouped by Smart proxy group."
+msgstr "Показывает уникальные узлы, их текущий рейтинг и вес отдельно для каждой Smart-группы."
+
+msgid "Nodes are unique within each Smart group. Border and weight color: 0 is red, 50 yellow, 100 green."
+msgstr "Внутри каждой Smart-группы узлы не дублируются. Цвет рамки и значения веса: 0 — красный, 50 — жёлтый, 100 — зелёный."
+
+msgid "Refresh Smart weights"
+msgstr "Обновить веса Smart-групп"
+
+msgid "Could not read the configuration to detect Smart groups."
+msgstr "Не удалось прочитать конфигурацию и определить Smart-группы."
+
+msgid "Smart group is disabled in the configuration: no proxy group with type: smart was found."
+msgstr "Smart-группа отключена: в конфигурации не найдена proxy-группа с type: smart."
+
+msgid "Loading Smart weights..."
+msgstr "Загрузка весов Smart-групп..."
+
+msgid "Smart weights API request failed."
+msgstr "Не удалось получить данные из API Smart-групп."
+
+msgid "Smart weights API returned invalid JSON."
+msgstr "API Smart-групп вернул некорректный JSON."
+
+msgid "Smart group: %s"
+msgstr "Smart-группа: %s"
+
+msgid "Could not load Smart weights: %s"
+msgstr "Не удалось загрузить веса Smart-группы: %s"
+
+msgid "No Smart weight data is available for this group yet."
+msgstr "Для этой Smart-группы пока нет данных о весах."
+
+msgid "Smart API controller is not configured."
+msgstr "В конфигурации не задан адрес API контроллера Smart."
+
+msgid "Summary statistics were stale; total was recovered from the generated AUTO block."
+msgstr "Статистика summary-файла устарела; общее число восстановлено по AUTO-блоку списка."
+
+msgid "IP-CIDR entries exist, but provider statistics are unavailable."
+msgstr "Записи IP-CIDR найдены, но статистика по provider-ам недоступна."
+
+msgid "Server"
+msgstr "Сервер"
+
+msgid "Rank"
+msgstr "Ранг"
+
+msgid "Weight"
+msgstr "Вес"
+
+msgid "Download and manage the Mihomo (Clash Meta) kernel binary."
+msgstr "Загрузка и управление исполняемым файлом ядра Mihomo (Clash Meta)."
+
+msgid "Release source"
+msgstr "Источник релизов"
+
+msgid "Official Mihomo"
+msgstr "Официальный Mihomo"
+
+msgid "Custom GitHub release"
+msgstr "Свой релиз GitHub"
+
+msgid "Save release source"
+msgstr "Сохранить источник"
+
+msgid "Enter a GitHub repository as owner/repository."
+msgstr "Укажите репозиторий GitHub в формате владелец/репозиторий."
+
+msgid "Release source saved: %s"
+msgstr "Источник релизов сохранён: %s"
+
+msgid "Failed to save release source: %s"
+msgstr "Не удалось сохранить источник релизов: %s"
+
+msgid "Invalid GitHub repository. Use owner/repo format."
+msgstr "Некорректный репозиторий GitHub. Используйте формат владелец/репозиторий."
+
+msgid "No compatible .gz binary found for architecture %s in %s"
+msgstr "Для архитектуры %s в репозитории %s не найден совместимый .gz-файл"
+
+msgid "Interface Processing Mode"
+msgstr "Режим обработки интерфейсов"
+
+msgid "Choose how to handle network interfaces for proxy processing."
+msgstr "Выберите, как обрабатывать сетевые интерфейсы для проксирования."
+
+msgid "Proxy Mode"
+msgstr "Режим проксирования"
+
+msgid "Choose how traffic is redirected to Clash: TPROXY (all traffic), TUN (all traffic via virtual interface), or MIXED (TCP via TPROXY, UDP via TUN — best for gaming)."
+msgstr "Выберите, как перенаправлять трафик в Clash: TPROXY (весь трафик), TUN (весь трафик через виртуальный интерфейс) или MIXED (TCP через TPROXY, UDP через TUN — оптимально для игр)."
+
+msgid "Transparent proxy mode. Routes both TCP and UDP through TPROXY port 7894. Best compatibility, requires kernel TPROXY support."
+msgstr "Прозрачный режим прокси. Направляет как TCP, так и UDP через TPROXY-порт 7894. Максимальная совместимость, требуется поддержка TPROXY в ядре."
+
+msgid "TUN interface mode. Creates virtual network interface for all traffic. Better performance, works without TPROXY. Requires TUN kernel module."
+msgstr "Режим TUN-интерфейса. Создаёт виртуальный сетевой интерфейс для всего трафика. Лучшая производительность, работает без TPROXY. Требуется модуль ядра TUN."
+
+msgid "Hybrid mode (best for gaming). TCP via TPROXY (stable), UDP via TUN (low latency). Optimal for online games requiring fast UDP."
+msgstr "Гибридный режим (лучший для игр). TCP через TPROXY (стабильно), UDP через TUN (низкая задержка). Оптимален для онлайн‑игр, требующих быстрого UDP."
+
+msgid "TUN Stack"
+msgstr "Стек TUN"
+
+msgid "Choose Mihomo TUN stack. `system` is fastest but depends on kernel capabilities; `gvisor` is more compatible; `mixed` combines both."
+msgstr "Выберите стек TUN для Mihomo. `system` самый быстрый, но зависит от возможностей ядра; `gvisor` более совместим; `mixed` сочетает оба подхода."
+
+msgid "system: kernel network stack. If TCP in TUN fails on your device, try gvisor."
+msgstr "system: сетевой стек ядра. Если TCP в TUN не работает на вашем устройстве, попробуйте gvisor."
+
+msgid "gvisor: userspace stack, usually most compatible across routers."
+msgstr "gvisor: userspace-стек, обычно самый совместимый на разных роутерах."
+
+msgid "mixed: hybrid stack mode supported by some Mihomo builds."
+msgstr "mixed: гибридный режим стека, поддерживаемый некоторыми сборками Mihomo."
+
+msgid "Automatic Interface Detection"
+msgstr "Автоматическое определение интерфейсов"
+
+msgid "Additional Settings"
+msgstr "Дополнительные настройки"
+
+msgid "Show Smart group weights"
+msgstr "Показывать веса Smart-групп"
+
+msgid "The core must support proxy groups with type: smart. If unsupported, this widget will be hidden on the Status page."
+msgstr "Ядро должно поддерживать группы прокси типа smart. Если поддержки нет, этот блок будет скрыт на странице «Статус»."
+
+msgid "Exclude Mode (Universal approach)"
+msgstr "Режим исключения (универсальный)"
+
+msgid "Process traffic from ALL interfaces except selected ones. Automatically detects and excludes WAN. Recommended for most users."
+msgstr "Обрабатывать трафик со всех интерфейсов, кроме выбранных. Автоматически обнаруживает и исключает WAN. Рекомендуется для большинства пользователей."
+
+msgid "Explicit Mode (Precise control)"
+msgstr "Явный режим (точный контроль)"
+
+msgid "Process traffic ONLY from selected interfaces. More secure but requires manual configuration. Recommended for advanced users."
+msgstr "Обрабатывать трафик только с выбранных интерфейсов. Более безопасно, но требует ручной настройки. Рекомендуется для опытных пользователей."
+
+msgid "Automatically detect LAN bridge interface"
+msgstr "Автоматически определять LAN-мост"
+
+msgid "When enabled, automatically finds the main LAN bridge. Disable to manually select specific interfaces."
+msgstr "Если включено, автоматически находит основной LAN-мост. Отключите для ручного выбора интерфейсов."
+
+msgid "Automatically detect WAN interface"
+msgstr "Автоматически определять WAN-интерфейс"
+
+msgid "When enabled, automatically detects and excludes WAN interface. Disable to manually select interfaces to exclude."
+msgstr "Если включено, автоматически обнаруживает и исключает WAN-интерфейс. Отключите для ручного выбора интерфейсов для исключения."
+
+msgid "Select interfaces to process"
+msgstr "Выберите интерфейсы для обработки"
+
+msgid "Traffic from these interfaces will be processed by the proxy."
+msgstr "Трафик с этих интерфейсов будет обработан прокси."
+
+msgid "Select interfaces to exclude"
+msgstr "Выберите интерфейсы для исключения"
+
+msgid "Traffic from these interfaces will bypass the proxy (direct routing)."
+msgstr "Трафик с этих интерфейсов будет идти в обход прокси (прямая маршрутизация)."
+
+msgid "Block QUIC traffic (UDP port 443)"
+msgstr "Блокировать трафик QUIC (UDP-порт 443)"
+
+msgid "When enabled, blocks QUIC traffic on UDP port 443. This can improve proxy effectiveness for some services like YouTube."
+msgstr "Если включено, блокирует трафик QUIC по порту 443 (UDP). Это может улучшить эффективность прокси для таких сервисов, как YouTube."
+
+msgid "Kernel Status"
+msgstr "Статус ядра"
+
+msgid "Installed"
+msgstr "Установлено"
+
+msgid "Not Installed"
+msgstr "Не установлено"
+
+msgid "Version"
+msgstr "Версия"
+
+msgid "System Architecture"
+msgstr "Архитектура системы"
+
+msgid "Latest Available"
+msgstr "Последняя доступная"
+
+msgid "Update Available"
+msgstr "Доступно обновление"
+
+msgid "Kernel is up to date"
+msgstr "Ядро обновлено до последней версии"
+
+msgid "Mihomo kernel binary not found"
+msgstr "Исполняемый файл ядра Mihomo не найден"
+
+msgid "Failed to check latest version"
+msgstr "Не удалось проверить последнюю версию"
+
+msgid "Error checking status"
+msgstr "Ошибка проверки статуса"
+
+msgid "Mihomo (version detected)"
+msgstr "Mihomo (версия определена)"
+
+msgid "Installed (%dMB)"
+msgstr "Установлено (%d МБ)"
+
+msgid "Download Latest Kernel"
+msgstr "Скачать последнее ядро"
+
+msgid "Download Update"
+msgstr "Скачать обновление"
+
+msgid "Reinstall Kernel"
+msgstr "Переустановить ядро"
+
+msgid "Downloading..."
+msgstr "Загрузка..."
+
+msgid "Checking..."
+msgstr "Проверка..."
+
+msgid "Refresh Status"
+msgstr "Обновить статус"
+
+msgid "Restart Service"
+msgstr "Перезапустить службу"
+
+msgid "Save Settings"
+msgstr "Сохранить настройки"
+
+msgid "Clear All Interfaces"
+msgstr "Очистить выбор"
+
+msgid "Mode: Explicit (process only selected)"
+msgstr "Режим: Явный (обрабатывать только выбранные)"
+
+msgid "Mode: Exclude (process all except selected)"
+msgstr "Режим: Исключения (обрабатывать все, кроме выбранных)"
+
+msgid "Auto-detected LAN: %s ✓"
+msgstr "Авто-определение LAN: %s ✓"
+
+msgid "Auto-detected WAN: %s ✓"
+msgstr "Авто-определение WAN: %s ✓"
+
+msgid "Manual selection: %s"
+msgstr "Ручной выбор: %s"
+
+msgid "Manual exclusions: %s"
+msgstr "Ручные исключения: %s"
+
+msgid "No interfaces configured"
+msgstr "Интерфейсы не настроены"
+
+msgid "No exclusions configured"
+msgstr "Исключения не настроены"
+
+msgid "Available LAN bridge: %s"
+msgstr "Доступный LAN-мост: %s"
+
+msgid "No LAN bridge detected"
+msgstr "LAN-мост не обнаружен"
+
+msgid "Available WAN interface: %s"
+msgstr "Доступный WAN-интерфейс: %s"
+
+msgid "No WAN interface detected"
+msgstr "WAN-интерфейс не обнаружен"
+
+msgid "Settings saved. Please restart the Clash service for changes to take effect."
+msgstr "Настройки сохранены. Для вступления изменений в силу перезапустите службу Clash."
+
+msgid "Failed to save settings: %s"
+msgstr "Не удалось сохранить настройки: %s"
+
+msgid "Clash service restarted successfully."
+msgstr "Служба Clash успешно перезапущена."
+
+msgid "Failed to restart Clash service: %s"
+msgstr "Не удалось перезапустить службу Clash: %s"
+
+msgid "Downloading mihomo kernel..."
+msgstr "Загрузка ядра mihomo..."
+
+msgid "Mihomo kernel installed successfully. The service was stopped for a safe replacement — press \"Restart Service\" to activate the new kernel."
+msgstr "Ядро Mihomo успешно установлено. Служба была остановлена для безопасной замены — нажмите «Перезапустить службу», чтобы активировать новое ядро."
+
+msgid "Failed to install new binary: %s"
+msgstr "Не удалось установить новый исполняемый файл: %s"
+
+msgid "Failed to set executable permissions: %s"
+msgstr "Не удалось установить права на исполнение: %s"
+
+msgid "WARNING: Binary at %s is not executable after chmod (mode: %s). Check filesystem permissions, then manually run: chmod 0755 %s"
+msgstr "ВНИМАНИЕ: исполняемый файл %s не получил права на запуск после chmod (текущий режим: %s). Проверьте права файловой системы и выполните вручную: chmod 0755 %s"
+
+msgid "unknown"
+msgstr "неизвестно"
+
+msgid "Failed to download mihomo kernel: %s"
+msgstr "Не удалось загрузить ядро mihomo: %s"
+
+msgid "Failed to get release information"
+msgstr "Не удалось получить информацию о релизе"
+
+msgid "No binary found for architecture: %s"
+msgstr "Не найден исполняемый файл для архитектуры: %s"
+
+msgid "HTTP %d: %s"
+msgstr "HTTP %d: %s"
+
+msgid "Latest release is a pre-release"
+msgstr "Последний релиз является предварительным"
+
+msgid "Download failed: %s"
+msgstr "Загрузка не удалась: %s"
+
+msgid "Extraction failed: %s"
+msgstr "Распаковка не удалась: %s"
+
+msgid "Failed to read /sys/class/net:"
+msgstr "Не удалось прочитать /sys/class/net:"
+
+msgid "Failed to execute ip link:"
+msgstr "Не удалось выполнить ip link:"
+
+msgid "LuCI network API not available:"
+msgstr "Сетевой API LuCI недоступен:"
+
+msgid "LuCI network.getNetworks() not available:"
+msgstr "LuCI network.getNetworks() недоступен:"
+
+msgid "No network interfaces found on this system"
+msgstr "Сетевые интерфейсы в системе не найдены"
+
+msgid "UCI network detection failed, using fallback:"
+msgstr "Определение сети через UCI не удалось, используется резервный метод:"
+
+msgid "Failed to detect LAN bridge via ip command:"
+msgstr "Не удалось определить LAN-мост через команду ip:"
+
+msgid "Failed to detect LAN bridge:"
+msgstr "Не удалось обнаружить LAN-мост:"
+
+msgid "UCI WAN detection failed, using fallback:"
+msgstr "Определение WAN через UCI не удалось, используется резервный метод:"
+
+msgid "Failed to read route table:"
+msgstr "Не удалось прочитать таблицу маршрутизации:"
+
+msgid "Failed to detect WAN interface:"
+msgstr "Не удалось обнаружить WAN-интерфейс:"
+
+msgid "Failed to detect architecture:"
+msgstr "Не удалось определить архитектуру:"
+
+msgid "Failed to get latest release:"
+msgstr "Не удалось получить последний релиз:"
+
+msgid "Failed to update kernel status:"
+msgstr "Не удалось обновить статус ядра:"
+
+msgid "Failed to update interface checkboxes:"
+msgstr "Не удалось обновить флажки интерфейсов:"
+
+msgid "Failed to update auto detect settings:"
+msgstr "Не удалось обновить настройки автоопределения:"
+
+msgid "Failed to detect interfaces:"
+msgstr "Не удалось обнаружить интерфейсы:"
+
+msgid "Failed to re-detect interfaces:"
+msgstr "Не удалось повторно обнаружить интерфейсы:"
+
+msgid "Failed to uncheck detected %s interface:"
+msgstr "Не удалось снять выбор с определенного интерфейса %s:"
+
+msgid "Restart Clash service after installing or updating the kernel"
+msgstr "Перезапустите службу Clash после установки или обновления ядра"
+
+msgid "Restart Clash service after saving changes"
+msgstr "Перезапустите службу Clash после сохранения изменений"
+
+msgid "AUTO"
+msgstr "АВТО"
+
+msgid "Store rules and proxy providers in RAM (tmpfs)"
+msgstr "Хранить правила и proxy-providers в RAM (tmpfs)"
+
+msgid "When enabled, rulesets and proxy-providers directories are placed on tmpfs to extend the lifespan of the NAND chip (at the cost of using RAM). Disable to keep them on persistent storage."
+msgstr "Если включено, каталоги rulesets и proxy-providers размещаются в tmpfs для сохранения ресурса NAND-чипа (за счёт использования оперативной памяти). Отключите, чтобы хранить их на постоянном носителе."
+
+### HWID-заголовки ###
+
+msgid "Add HWID headers to subscriptions"
+msgstr "Добавить HWID-заголовки к подпискам"
+
+msgid "Automatically adds HWID headers to proxy-providers for device tracking (Remnawave compatibility)."
+msgstr "Автоматически добавляет HWID-заголовки к proxy-providers для отслеживания устройства (совместимость с Remnawave)."
+
+msgid "User-Agent"
+msgstr "User-Agent"
+
+msgid "Device OS"
+msgstr "ОС устройства"
+
+msgid "Values sent in HTTP headers of proxy-provider requests (User-Agent / x-device-os)."
+msgstr "Значения, отправляемые в HTTP-заголовках запросов proxy-provider (User-Agent / x-device-os)."
+
+msgid "Adding HWID headers to configuration..."
+msgstr "Добавление HWID-заголовков в конфигурацию..."
+
+msgid "ASClash"
+msgstr "ASClash"
+
+msgid "Checking for updates..."
+msgstr "Проверка обновлений..."
+
+msgid "Up to date"
+msgstr "Актуальная версия"
+
+msgid "New version available: %s"
+msgstr "Доступна новая версия: %s"
+
+msgid "Update check failed"
+msgstr "Не удалось проверить обновления"
+
+msgid "Download"
+msgstr "Скачать"
+
+msgid "by"
+msgstr "автор:"
+
+msgid "Donate"
+msgstr "Поддержать"
+
+msgid "Support the author"
+msgstr "Поддержать автора"
+
+msgid "Loading..."
+msgstr "Загрузка..."
+
+msgid "Provider"
+msgstr "Провайдер"
+
+msgid "CIDR entries"
+msgstr "Записей CIDR"
+
+msgid "FIREWALL"
+msgstr "ФАЙРВОЛ"
+
+msgid "IP-CIDR list without conditions"
+msgstr "Список IP-CIDR без условий"
+
+msgid "This list is used by the firewall (nftables/iptables) to mark traffic to the listed subnets when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "Этот список используется файрволом (nftables/iptables) для маркировки трафика к указанным подсетям при fake-ip-filter-mode «whitelist» или «rule». Изменения применяются сразу без перезапуска Mihomo."
+
+msgid "This block is generated automatically from IP-CIDR entries in providers referenced by non-DIRECT rules. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration or provider data changes."
+msgstr "Этот блок автоматически формируется из записей IP-CIDR provider-ов, на которые ссылаются правила не DIRECT. Он обновляется при запуске службы и каждом обновлении clash-rules (раз в 30 минут), только если изменились конфигурация или данные provider-ов."
+
+msgid "Total IP-CIDR entries"
+msgstr "Всего записей IP-CIDR"
+
+msgid "No data available."
+msgstr "Нет данных."
+
+msgid "Network"
+msgstr "Сеть"
+
+msgid "Destination ports"
+msgstr "Порты назначения"
+
+msgid "IP-CIDR list with AND conditions"
+msgstr "Список IP-CIDR с AND-условиями"
+
+msgid "This list is used by nftables to mark traffic to subnets matching the conditions when fake-ip-filter-mode is set to \"whitelist\" or \"rule\". Saving applies changes immediately without restarting Mihomo."
+msgstr "Этот список используется nftables для маркировки трафика к подсетям, подходящим под условия, при fake-ip-filter-mode «whitelist» или «rule». Изменения применяются сразу без перезапуска Mihomo."
+
+msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
+msgstr "Этот блок автоматически формируется из IP-CIDR в AND-правилах — напрямую или через provider-ы, на которые ссылаются правила не DIRECT. Записи загружаются в отдельные наборы IPv4 nftables; диапазоны портов и транспорт сохраняются, а не разворачиваются в пары IP/порт. Блок обновляется при запуске службы и каждом обновлении clash-rules (раз в 30 минут), только если изменились конфигурация, правила или данные provider-ов."
+

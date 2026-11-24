@@ -1,24 +1,20 @@
 📖 Read this in other languages:
 - [English](README.md)
 
-> **Основная разработка теперь ведётся в [SSClash-Go](https://github.com/zerolabnet/SSClash-Go).**  
-> Для новых установок рекомендуется Go-редакция (один статический бинарник, встроенный веб-интерфейс, тот же каталог `/opt/clash` и набор возможностей).  
-> Этот репозиторий — legacy **LuCI-приложение** (`luci-app-ssclash`) для OpenWrt; здесь по-прежнему выходят релизы с исправлениями, а новые функции — в SSClash-Go.
+> **ASClash (Advanced Simple Clash)** — приложение для управления прокси на OpenWrt от Desonator, основанное на [проекте SSClash от ZeroChaos](https://github.com/zerolabnet/SSClash).
 
-<p align="center">
- <img src=".github/assets/images/logos/SSClash.png" width="200">
-</p>
-
-<h3 align="center">Пошаговая инструкция по установке и настройке SSClash на вашем роутере с OpenWrt</h3>
+<h3 align="center">Advanced Simple Clash — установка и настройка ASClash на OpenWrt</h3>
 
 # Руководство по установке
 
 ## Скрипт автоустановки
 
-Устанавливает или обновляет все зависимости, luci-app-ssclash и актуальное ядро Mihomo.
+Устанавливает или обновляет зависимости, пакет LuCI ASClash и ядро Mihomo.
+Скрипт переносит старый пакет `luci-app-ssclash` на `luci-app-asclash` и
+сохраняет конфигурацию и пользовательские данные в `/opt/clash`.
 
 ```bash
-wget --no-proxy -qO- https://github.com/zerolabnet/SSClash/raw/refs/heads/main/install-ssclash.sh | ash
+wget --no-proxy -qO- https://github.com/Desonator/ASClash/raw/refs/heads/main/install-asclash.sh | ash
 ```
 
 ## Установка вручную
@@ -63,25 +59,31 @@ opkg install kmod-nft-tproxy
 opkg install iptables-mod-tproxy
 ```
 
-## Шаг 3: Загрузка и установка пакета `luci-app-ssclash`
+## Шаг 3: Загрузка и установка пакета ASClash
 
-Загрузите пакет SSClash и установите его.
+Загрузите пакет ASClash и установите его. При ручном переходе со старого
+пакета сначала остановите службу и удалите `luci-app-ssclash`; конфигурация и
+пользовательские данные в `/opt/clash` сохраняются.
 
 ```bash
 # OpenWrt >= 25:
-curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash-4.7.1-r33.apk -o /tmp/luci-app-ssclash-4.7.1-r33.apk
-apk add --allow-untrusted /tmp/luci-app-ssclash-4.7.1-r33.apk
+/etc/init.d/clash stop 2>/dev/null || true
+curl -L https://github.com/Desonator/ASClash/releases/download/v4.7.1/luci-app-asclash-4.7.1-r1.apk -o /tmp/luci-app-asclash-4.7.1-r1.apk
+apk del luci-app-ssclash 2>/dev/null || true
+apk add --allow-untrusted /tmp/luci-app-asclash-4.7.1-r1.apk
 
 # OpenWrt < 25:
-curl -L https://github.com/zerolabnet/ssclash/releases/download/v4.7.1/luci-app-ssclash_4.7.1-r41_all.ipk -o /tmp/luci-app-ssclash_4.7.1-r41_all.ipk
-opkg install /tmp/luci-app-ssclash_4.7.1-r41_all.ipk
+/etc/init.d/clash stop 2>/dev/null || true
+curl -L https://github.com/Desonator/ASClash/releases/download/v4.7.1/luci-app-asclash_4.7.1-r1_all.ipk -o /tmp/luci-app-asclash_4.7.1-r1_all.ipk
+opkg remove luci-app-ssclash 2>/dev/null || true
+opkg install /tmp/luci-app-asclash_4.7.1-r1_all.ipk
 
-rm /tmp/*.ipk /tmp/*.apk
+rm -f /tmp/luci-app-asclash_4.7.1-r1_all.ipk /tmp/luci-app-asclash-4.7.1-r1.apk
 ```
 
 ## Шаг 4: Управление ядром
 
-Откройте **Службы → SSClash → Статус → Управление ядром Mihomo**. Страница
+Откройте **Службы → ASClash → Статус → Управление ядром Mihomo**. Страница
 определяет архитектуру роутера, проверяет установленный бинарный файл и
 позволяет установить последний релиз из официального репозитория
 `MetaCubeX/mihomo` или пользовательского GitHub-репозитория (например,
@@ -106,7 +108,7 @@ Prizrak-Core используется валидатор настроенног�
 
 ## Шаг 5: Настройка обработки трафика
 
-SSClash предлагает два режима обработки интерфейсов:
+ASClash предлагает два режима обработки интерфейсов:
 
 ### Режим исключения (Универсальный подход) - **Рекомендуется для большинства пользователей**
 
@@ -141,7 +143,7 @@ SSClash предлагает два режима обработки интерф
  <img src=".github/assets/images/screenshots/scr-01.png" width="100%">
 </p>
 
-## Шаг 6: Управление конфигурацией Clash
+## Шаг 6: Управление конфигурацией ASClash
 
 Редактируйте свою конфигурацию Clash с помощью встроенного редактора, который включает:
 
@@ -224,7 +226,7 @@ IP-наборы, поэтому такой трафик может обходи�
 ### Группированные AND-правила IP-CIDR (только nftables)
 
 Для поддерживаемых `AND`-правил, объединяющих provider или прямые IPv4-записи
-`IP-CIDR` с `NETWORK` и/или `DST-PORT`, SSClash создаёт отдельные IPv4-наборы
+`IP-CIDR` с `NETWORK` и/или `DST-PORT`, ASClash создаёт отдельные IPv4-наборы
 nftables и компактные правила маркировки по протоколу/порту. Диапазоны портов
 остаются диапазонами, CIDR не разворачиваются в пары IP/порт. Функция работает
 только с nftables; grouped AND-правила не применяются в iptables-ветке. На
@@ -256,7 +258,7 @@ provider-ов, при поднятии WAN и cron-задачей каждые 3
 
 ### Веса Smart-групп
 
-На странице «Статус» SSClash находит группы с `type: smart` и запрашивает их
+На странице «Статус» ASClash находит группы с `type: smart` и запрашивает их
 уникальные серверы и веса через API `external-controller` ядра. Каждая группа
 показывается отдельно; карточки серверов сортируются по текущему весу и
 окрашиваются от красного (низкий вес) через жёлтый к зелёному (высокий вес).
@@ -293,16 +295,16 @@ GROUPED_FAKEIP_MAX_CIDRS="150000"
 nft -c -f /tmp/clash/fakeip_port_groups.nft
 ```
 
-# Удаление Clash
+# Удаление ASClash
 
-Чтобы удалить пакет Clash:
+Чтобы полностью удалить пакет ASClash:
 
 ```bash
 # OpenWrt >= 25:
-apk del luci-app-ssclash
+apk del luci-app-asclash
 
 # OpenWrt < 25:
-opkg remove luci-app-ssclash
+opkg remove luci-app-asclash
 ```
 
 Для удаления пакета не нужно удалять `/opt/clash`: там находятся конфигурация,
