@@ -28,6 +28,11 @@ async function command(path, args) {
 	}
 }
 
+async function checkKernelRunning() {
+	const script = 'for exe in /proc/[0-9]*/exe; do [ "$(readlink "$exe" 2>/dev/null)" = "/opt/clash/bin/clash" ] && exit 0; done; exit 1';
+	return command('/bin/sh', ['-c', script]);
+}
+
 function parseGroupedSummary(text) {
 	const rows = String(text || '').split(/\r?\n/).filter(Boolean).map(line => {
 		const [providers, network, ports, providerCount, setName, setCount] = line.split('|');
@@ -248,7 +253,7 @@ function listSection(title, state, statusText, metrics, note) {
 return view.extend({
 	load: async function() {
 		const paths = Object.values(FILES);
-		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain] = await Promise.all([
+		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelProcess, whitelistSet, markChain] = await Promise.all([
 			Promise.all(paths.map(read)),
 			command('/usr/sbin/nft', ['list', 'chains', 'inet']),
 			command('/sbin/ip', ['rule', 'show']),
@@ -257,16 +262,17 @@ return view.extend({
 			command('/sbin/ip', ['link', 'show', 'clash-tun']),
 			command('/sbin/logread', ['-e', 'clash-rules']),
 			view_asclash_utils.getClashRunning().catch(() => null),
+			checkKernelRunning(),
 			command('/usr/sbin/nft', ['list', 'set', 'inet', 'clash', 'fakeip_whitelist']),
 			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'CLASH_MARK'])
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
 		const api = await checkMihomoApi(files[FILES.config]);
-		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain, api, checkedAt: new Date().toLocaleString() };
+		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, api, checkedAt: new Date().toLocaleString() };
 	},
 
 	render: function(data) {
-		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain, api, checkedAt } = data;
+		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
 		const progressFields = String(files[FILES.listProgress] || '').trim().split('|');
@@ -386,7 +392,7 @@ return view.extend({
 		const missingModeChecks = modeChecks.filter(([, ok]) => !ok).map(([label]) => label);
 		const modeCard = card(_('Network mode consistency'), E('div', {}, [
 			E('p', { 'style': 'margin:0 0 8px;' }, [_('Configured mode: '), E('strong', {}, modeLabel), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))]),
-			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;' }, modeChecks.map(([label, ok]) => E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [E('span', {}, label), statusPill(ok, _('Present'), _('Missing'))]))),
+			E('div', { 'style': 'display:flex;flex-wrap:wrap;column-gap:18px;row-gap:4px;' }, modeChecks.map(([label, ok]) => E('div', { 'style': 'display:flex;align-items:center;gap:6px;padding:3px 0;' }, [E('span', {}, label), statusPill(ok, _('Present'), _('Missing'))]))),
 			!routingOk ? E('p', { 'class': 'alert-message warning', 'style': 'margin:10px 0 0;' }, [_('Missing or inconsistent components: %s. Compare the configured mode with the active nftables chains, ip rules, routes and TUN interface; after changing network-mode settings, restart the Clash service.').format(missingModeChecks.join(', '))]) : null,
 			E('details', { 'style': 'margin-top:10px;' }, [
 				E('summary', { 'style': 'cursor:pointer;' }, _('Raw network details')),
@@ -408,7 +414,7 @@ return view.extend({
 		]));
 
 		const refresh = E('button', { 'class': 'btn', 'click': () => window.location.reload() }, _('Refresh diagnostics'));
-		return E('div', { 'style': 'max-width:1100px;margin:0 auto;' }, [
+		const root = E('div', { 'style': 'max-width:1100px;margin:0 auto;' }, [
 			E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;' }, [
 				E('h2', { 'style': 'margin:0;' }, _('Diagnostics')), refresh
 			]),
@@ -418,6 +424,73 @@ return view.extend({
 			listsCard,
 			warningCard
 		]);
+
+		let polling = false;
+		let lastReport = String(files[FILES.listDiagnostics] || '');
+		let lastPhase = listDiagnostics.cycle.phase;
+		let lastRuntime = serviceRunning == null ? null : `${serviceRunning ? 1 : 0}:${kernelRunning ? 1 : 0}`;
+		let candidateRuntime = null;
+		let candidateSamples = 0;
+		const refreshTimer = setInterval(async () => {
+			if (!root.isConnected) {
+				clearInterval(refreshTimer);
+				return;
+			}
+			if (document.hidden || polling) return;
+			polling = true;
+			let reload = false;
+			try {
+				const [currentService, currentKernel, currentReport] = await Promise.all([
+					view_asclash_utils.getClashRunning().catch(() => null),
+					checkKernelRunning(),
+					read(FILES.listDiagnostics)
+				]);
+				const reportText = String(currentReport || '');
+				if (reportText !== lastReport) {
+					const nextPhase = parseListDiagnostics(reportText).cycle.phase;
+					if (['complete', 'timeout', 'failed'].includes(nextPhase) || (nextPhase === 'waiting' && !['waiting', 'checking'].includes(lastPhase)))
+						reload = true;
+					lastReport = reportText;
+					lastPhase = nextPhase;
+				}
+
+				if (currentService != null) {
+					const runtime = `${currentService ? 1 : 0}:${currentKernel.ok ? 1 : 0}`;
+					if (lastRuntime == null) {
+						lastRuntime = runtime;
+					} else if (runtime === lastRuntime) {
+						candidateRuntime = null;
+						candidateSamples = 0;
+					} else {
+						if (candidateRuntime !== runtime) {
+							candidateRuntime = runtime;
+							candidateSamples = 1;
+						} else {
+							candidateSamples++;
+						}
+						if (candidateSamples >= 2) {
+							const [serviceWasRunning, kernelWasRunning] = lastRuntime.split(':').map(value => value === '1');
+							const serviceNowRunning = currentService;
+							const kernelNowRunning = currentKernel.ok;
+							lastRuntime = runtime;
+							candidateRuntime = null;
+							candidateSamples = 0;
+							const becameStopped = (serviceWasRunning && !serviceNowRunning) || (kernelWasRunning && !kernelNowRunning);
+							const reportPending = ['waiting', 'checking'].includes(lastPhase);
+							if (becameStopped || !reportPending) reload = true;
+						}
+					}
+				}
+			} finally {
+				polling = false;
+			}
+			if (reload && root.isConnected) {
+				clearInterval(refreshTimer);
+				window.location.reload();
+			}
+		}, 5000);
+
+		return root;
 	},
 
 	handleSaveApply: null,
