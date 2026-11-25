@@ -39,7 +39,6 @@ DETECTED_LAN=""
 DETECTED_WAN=""
 INCLUDED_INTERFACES=""
 EXCLUDED_INTERFACES=""
-DHCP_BYPASS_MACS=""
 # Populated in start() when fake-ip-filter-mode: whitelist or rule is detected
 FAKE_IP_FILTER_MODE="blacklist"
 FAKEIP_WHITELIST_IPS=""
@@ -249,7 +248,6 @@ load_all_settings_once() {
             "DETECTED_WAN") DETECTED_WAN="$value" ;;
             "INCLUDED_INTERFACES") INCLUDED_INTERFACES="$value" ;;
             "EXCLUDED_INTERFACES") EXCLUDED_INTERFACES="$value" ;;
-            "DHCP_BYPASS_MACS") DHCP_BYPASS_MACS="$value" ;;
             "AUTO_FAKEIP_WHITELIST") AUTO_FAKEIP_WHITELIST="$value" ;;
             "GROUPED_FAKEIP_PORT_RULES_ENABLED") GROUPED_FAKEIP_PORT_RULES_ENABLED="$value" ;;
             "GROUPED_FAKEIP_PORT_RULES_DRY_RUN") GROUPED_FAKEIP_PORT_RULES_DRY_RUN="$value" ;;
@@ -269,7 +267,6 @@ load_all_settings_once() {
     [ -n "$DETECTED_WAN" ] && settings_part="$settings_part, Detected WAN: $DETECTED_WAN"
     [ -n "$INCLUDED_INTERFACES" ] && settings_part="$settings_part, Included interfaces: '$INCLUDED_INTERFACES'"
     [ -n "$EXCLUDED_INTERFACES" ] && settings_part="$settings_part, Excluded interfaces: '$EXCLUDED_INTERFACES'"
-    [ -n "$DHCP_BYPASS_MACS" ] && settings_part="$settings_part, DHCP bypass devices configured"
 
     if [ "$CLASH_RULES_QUIET" != "1" ]; then
         if [ -n "$settings_part" ]; then
@@ -278,33 +275,6 @@ load_all_settings_once() {
             msg "Settings loaded (no values specified in settings file)."
         fi
     fi
-}
-
-# Resolve selected permanent DHCP reservations to their current configured
-# IPv4 addresses. Dynamic leases are intentionally never consulted.
-get_dhcp_bypass_ips() {
-    [ -n "$DHCP_BYPASS_MACS" ] || return 0
-    command -v uci >/dev/null 2>&1 || return 0
-
-    local selected_macs section mac mac_candidate ips ip
-    selected_macs=" $(echo "$DHCP_BYPASS_MACS" | tr 'A-F,' 'a-f ') "
-    for section in $(uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.\([^.=]*\)=host$/\1/p"); do
-        mac=$(uci -q get "dhcp.$section.mac" 2>/dev/null | tr 'A-F' 'a-f')
-        for mac_candidate in $mac; do
-            case "$mac_candidate" in
-                [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;;
-                *) continue ;;
-            esac
-            case "$selected_macs" in
-                *" $mac_candidate "*) ;;
-                *) continue ;;
-            esac
-            ips=$(uci -q get "dhcp.$section.ip" 2>/dev/null)
-            for ip in $ips; do
-                is_valid_ip "$ip" && printf '%s\n' "$ip"
-            done
-        done
-    done | sort -u
 }
 
 # Parse routing-mark from config.yaml (defaults to 2 if absent).
@@ -2611,6 +2581,7 @@ apply_nft_src_ip_cidr_policy() {
     local reject_src_cidrs direct_src_cidrs
     reject_src_cidrs=$(extract_reject_src_ip_cidrs)
     direct_src_cidrs=$(extract_direct_src_ip_cidrs)
+
     if [ -n "$reject_src_cidrs" ]; then
         echo "$reject_src_cidrs" | while IFS= read -r src; do
             [ -n "$src" ] && nft add rule inet clash CLASH_MARK ip saddr "$src" counter reject
@@ -2624,25 +2595,6 @@ apply_nft_src_ip_cidr_policy() {
         done
         msg "SRC-IP-CIDR direct policy applied for: $(echo "$direct_src_cidrs" | tr '\n' ' ')"
     fi
-}
-
-apply_nft_dhcp_bypass() {
-    local fake_ip_range="$1"
-    local dhcp_bypass_ips
-    dhcp_bypass_ips=$(get_dhcp_bypass_ips)
-    [ -n "$dhcp_bypass_ips" ] || return 0
-
-    local udp_mark="$MARK_TPROXY"
-    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
-    echo "$dhcp_bypass_ips" | while IFS= read -r ip; do
-        [ -n "$ip" ] || continue
-        if [ -n "$fake_ip_range" ]; then
-            nft add rule inet clash CLASH_MARK ip saddr "$ip" ip daddr "$fake_ip_range" meta l4proto tcp counter meta mark set "$MARK_TPROXY"
-            nft add rule inet clash CLASH_MARK ip saddr "$ip" ip daddr "$fake_ip_range" meta l4proto udp counter meta mark set "$udp_mark"
-        fi
-        nft add rule inet clash CLASH_MARK ip saddr "$ip" counter return
-    done
-    msg "Permanent DHCP clients excluded from proxy: $(echo "$dhcp_bypass_ips" | tr '\n' ' ')"
 }
 
 # For nftables - in explicit mode with fake-ip-filter-mode whitelist/rule,
@@ -2990,7 +2942,6 @@ apply_iptables_tproxy_rules() {
     local fake_ip_range="$1"
     local server_ips="$2"
 
-    apply_iptables_dhcp_bypass "$fake_ip_range"
     apply_iptables_src_ip_cidr_policy
     apply_iptables_src_ip_cidr_rules "$server_ips"
 
@@ -3060,6 +3011,7 @@ apply_iptables_src_ip_cidr_policy() {
     local reject_src_cidrs direct_src_cidrs
     reject_src_cidrs=$(extract_reject_src_ip_cidrs)
     direct_src_cidrs=$(extract_direct_src_ip_cidrs)
+
     if [ -n "$reject_src_cidrs" ]; then
         echo "$reject_src_cidrs" | while IFS= read -r src; do
             [ -n "$src" ] && iptables -t mangle -A CLASH_PROCESS -s "$src" -j DROP
@@ -3073,37 +3025,6 @@ apply_iptables_src_ip_cidr_policy() {
         done
         msg "SRC-IP-CIDR direct policy applied for: $(echo "$direct_src_cidrs" | tr '\n' ' ')"
     fi
-}
-
-apply_iptables_dhcp_bypass() {
-    local fake_ip_range="$1"
-    local dhcp_bypass_ips
-    dhcp_bypass_ips=$(get_dhcp_bypass_ips)
-    [ -n "$dhcp_bypass_ips" ] || return 0
-
-    local udp_mark="$MARK_TPROXY"
-    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
-    echo "$dhcp_bypass_ips" | while IFS= read -r ip; do
-        [ -n "$ip" ] || continue
-        if [ -n "$fake_ip_range" ]; then
-            case "$PROXY_MODE" in
-                tun)
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j MARK --set-mark "$MARK_TPROXY"
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j MARK --set-mark "$MARK_TPROXY"
-                    ;;
-                mixed)
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j MARK --set-mark "$udp_mark"
-                    ;;
-                *)
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                    ;;
-            esac
-        fi
-        iptables -t mangle -A CLASH_PROCESS -s "$ip" -j RETURN
-    done
-    msg "Permanent DHCP clients excluded from proxy: $(echo "$dhcp_bypass_ips" | tr '\n' ' ')"
 }
 
 # For iptables - in explicit mode with fake-ip-filter-mode whitelist/rule, route
@@ -3362,10 +3283,6 @@ apply_nft_rules() {
     else
         msg "Minimal exclusion rules applied (fake-ip-filter-mode: whitelist - only system protection)"
     fi
-
-    # Keep selected permanent DHCP clients out of every later marking rule,
-    # including the grouped provider/port rules appended to CLASH_MARK.
-    apply_nft_dhcp_bypass "$fake_ip_range"
 
     # Apply grouped provider/port rules after service, reserved-network and
     # proxy-server exclusions so those returns always take precedence.

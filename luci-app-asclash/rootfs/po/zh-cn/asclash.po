@@ -890,21 +890,6 @@ msgstr "自动接口检测"
 msgid "Additional Settings"
 msgstr "其他设置"
 
-msgid "Exceptions for permanent DHCP leases"
-msgstr "固定 DHCP 租约设备例外"
-
-msgid "Selected devices will bypass the proxy for real-IP traffic. Fake-IP traffic still goes through the core for address mapping and follows the core routing rules. Only permanent DHCP reservations with a MAC address and IPv4 address are listed."
-msgstr "所选设备的真实 IP 流量将绕过代理。Fake-IP 流量仍会经过核心进行地址映射，并遵循核心路由规则。列表仅包含同时配置 MAC 地址和 IPv4 地址的固定 DHCP 租约。"
-
-msgid "No permanent DHCP reservations with MAC and IPv4 address were found."
-msgstr "未找到包含 MAC 地址和 IPv4 地址的固定 DHCP 租约。"
-
-msgid "Could not read permanent DHCP reservations. Previously selected exceptions will be preserved."
-msgstr "无法读取固定 DHCP 租约。之前选择的例外设备将被保留。"
-
-msgid "Failed to load permanent DHCP leases:"
-msgstr "无法加载固定 DHCP 租约："
-
 msgid "Show Smart group weights"
 msgstr "显示 Smart 组权重"
 
