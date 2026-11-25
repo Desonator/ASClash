@@ -2187,9 +2187,9 @@ return view.extend({
             tunStackSection,
             autoDetectOptions,
             interfaceSelector,
+            statusSection,
             additionalSettings,
-            buttonContainer,
-            statusSection
+            buttonContainer
         ]);
 
         return view;
