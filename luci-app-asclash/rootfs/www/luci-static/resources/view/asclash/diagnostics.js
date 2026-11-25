@@ -136,15 +136,22 @@ function formatGroupedSkipReason(reason) {
 	return reason;
 }
 
-function summarizeFakeIpIssues(log) {
+function summarizeFakeIpIssues(log, groupedProviders) {
 	const issues = new Map();
-	for (const line of String(log || '').split(/\r?\n/)) {
+	const lines = String(log || '').split(/\r?\n/);
+	const providerIssues = lines.map(line => line.match(/Auto fakeip whitelist: provider '([^']+)'/)).filter(Boolean);
+	const relevantProviderIssues = providerIssues.filter(match => !groupedProviders.has(match[1].toLowerCase())).length;
+	const excludedProviderIssues = providerIssues.length - relevantProviderIssues;
+	for (const line of lines) {
 		if (!line.includes('Auto fakeip whitelist:')) continue;
+		const providerMatch = line.match(/provider '([^']+)'/);
+		if (providerMatch && groupedProviders.has(providerMatch[1].toLowerCase())) continue;
 		let label = '';
 		if (/file not found/.test(line)) label = _('Provider file missing');
 		else if (/referenced but not defined/.test(line)) label = _('Provider is not defined');
 		else if (/could not be parsed/.test(line)) label = _('Provider could not be parsed');
 		else if (/none could be parsed/.test(line)) label = _('No referenced providers could be parsed');
+		if (label === _('No referenced providers could be parsed') && excludedProviderIssues && !relevantProviderIssues) continue;
 		if (label) issues.set(label, (issues.get(label) || 0) + 1);
 	}
 	return [...issues.entries()].map(([label, count]) => `${label} (${count})`);
@@ -190,6 +197,25 @@ function card(title, content) {
 	return E('section', { 'class': 'cbi-section', 'style': 'margin:12px 0;padding:14px;border:1px solid rgba(127,127,127,.35);border-radius:6px;' }, [
 		E('h3', { 'style': 'margin:0 0 10px;' }, title), content
 	]);
+}
+
+function compactDate(timestamp) {
+	return timestamp ? new Intl.DateTimeFormat(undefined, {
+		day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+	}).format(new Date(timestamp * 1000)) : '';
+}
+
+function listSection(title, state, statusText, metrics, note) {
+	const children = [
+		E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;' }, [
+			E('h4', { 'style': 'margin:0;' }, title),
+			E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${state === 'ok' ? '#198754' : state === 'error' ? '#b42336' : '#667085'};color:#fff;font-size:12px;font-weight:600;` }, statusText)
+		]),
+		E('div', { 'style': 'margin-top:7px;' }, metrics)
+	];
+	if (note)
+		children.push(E('p', { 'class': state === 'error' ? 'alert-message warning' : 'cbi-section-descr', 'style': 'margin:6px 0 0;' }, note));
+	return E('div', { 'style': 'padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:5px;' }, children);
 }
 
 return view.extend({
@@ -246,11 +272,13 @@ return view.extend({
 		const routingOk = !!routingChecks[proxyMode] && nftOk;
 		const skippedCounts = new Map();
 		for (const row of skipped) {
+			if (String(row[1] || '').startsWith('excluded-action-')) continue;
 			const reason = formatGroupedSkipReason(row[1] || '');
 			skippedCounts.set(reason, (skippedCounts.get(reason) || 0) + (Number(row[2]) || 0));
 		}
 		const skippedSummary = [...skippedCounts.entries()].map(([reason, count]) => `${reason} (${count})`);
-		const fakeIpIssues = summarizeFakeIpIssues(logread.output);
+		const groupedProviderNames = new Set([...grouped.providers.keys()].map(name => name.toLowerCase()));
+		const fakeIpIssues = summarizeFakeIpIssues(logread.output, groupedProviderNames);
 		const warnings = String(logread.output || '').split(/\r?\n/).filter(line => /skip|invalid|warning|error|failed|exceed|refus/i.test(line)).slice(-30).map(formatDiagnosticLogLine);
 
 		const summary = E('div', { 'class': 'table' }, [
@@ -263,35 +291,31 @@ return view.extend({
 			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:10px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
 		]);
 
-		const progressLabels = {
-			building: progressFresh ? _('Building…') : _('Build status stale'),
-			applying: progressFresh ? _('Applying…') : _('Apply status stale'),
-			applied: _('Updated'),
-			failed: _('Update failed')
-		};
-		const progressState = progressPhase === 'failed' ? 'error' : (progressPhase === 'building' || progressPhase === 'applying') && progressFresh ? 'warning' : progressPhase === 'applied' ? 'ok' : 'unknown';
-		const progressDetail = progressPhase === 'unknown'
-			? _('No update status')
-			: `${progressLabels[progressPhase] || _('List operation status is unknown')}${progressTime ? ` · ${new Date(progressTime * 1000).toLocaleString()}` : ''}`;
 		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
 		const groupedActive = grouped.total === 0 || (!!groupedSourceDigest && groupedSourceDigest === groupedAppliedDigest && markChain.ok && /@fp_[a-f0-9]+/.test(markChain.output));
-		const skippedTotal = skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0);
-		const listDetails = [];
-		if (fakeIpIssues.length)
-			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, [E('strong', {}, _('Fake-IP: ')), fakeIpIssues.join('; ')]));
-		if (parserReportAvailable && skippedSummary.length)
-			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, [E('strong', {}, _('Grouped AND: ')), skippedSummary.join('; ')]));
-		if (!parserReportAvailable)
-			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, _('Grouped parser report unavailable (disabled or not generated).')));
-		listDetails.push(E('p', { 'class': 'cbi-section-descr', 'style': 'margin:6px 0 0;' }, _('Active status checks nftables objects and the grouped digest; it does not compare every IP entry.')));
-		const listsCard = card(_('Rule lists'), E('div', {}, [
-			E('p', { 'style': 'margin:0 0 8px;' }, [statePill(progressState), ' ', progressDetail]),
-			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;' }, [
-				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;' }, [E('span', {}, [_('Fake-IP whitelist'), ': ', E('strong', {}, String(whitelist.total)), ' · ', String(whitelist.providers.length), ' ', _('providers')]), statusPill(whitelistActive, _('Set found'), whitelist.total ? _('Set missing') : _('No entries'))]),
-				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;' }, [E('span', {}, [_('Grouped AND'), ': ', E('strong', {}, parserReportAvailable ? String(accepted) : '—'), ' / ', parserReportAvailable ? String(skippedTotal) : '—', ' · ', String(grouped.sets.size), ' ', _('sets'), ' · ', String(grouped.total), ' ', _('CIDRs')]), statusPill(groupedActive, _('Active'), grouped.total ? _('Not confirmed') : _('No entries'))])
+		const listsState = progressPhase === 'failed' || (progressPhase === 'applied' && (!whitelistActive || !groupedActive)) ? 'error'
+			: (progressPhase === 'building' || progressPhase === 'applying') && progressFresh ? 'warning'
+			: progressPhase === 'applied' ? 'ok' : 'unknown';
+		const listsStatus = listsState === 'ok' ? _('OK') : listsState === 'error' ? _('Problem')
+			: listsState === 'warning' ? (progressPhase === 'building' ? _('Building') : _('Applying')) : _('Not checked');
+		const fakeStatus = whitelist.total === 0 ? _('No entries') : whitelistActive ? _('Set is present') : _('Set is missing');
+		const fakeNote = fakeIpIssues.length ? `${_('Parser notes: ')}${fakeIpIssues.join('; ')}` : '';
+		const groupedStatus = !groupedEnabled ? _('Disabled') : grouped.total === 0 ? _('No entries') : groupedActive ? _('Rules are active') : _('Not confirmed active');
+		const groupedNote = skippedSummary.length ? `${_('Parser notes: ')}${skippedSummary.join('; ')}` : '';
+		const groupedMetrics = parserReportAvailable
+			? _('Accepted: %d · Skipped: %d · nft sets: %d · CIDR entries: %d').format(accepted, skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0), grouped.sets.size, grouped.total)
+			: _('Accepted: — · Skipped: — · nft sets: %d · CIDR entries: %d').format(grouped.sets.size, grouped.total);
+		const listsCard = E('section', { 'class': 'cbi-section', 'style': 'margin:12px 0;padding:14px;border:1px solid rgba(127,127,127,.35);border-radius:6px;' }, [
+			E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;' }, [
+				E('h3', { 'style': 'margin:0;' }, _('Rule-list generation and application')),
+				E('div', { 'style': 'display:flex;align-items:center;gap:10px;' }, [statePill(listsState), E('span', { 'class': 'cbi-section-descr' }, compactDate(progressTime))])
 			]),
-			E('details', { 'style': 'margin-top:8px;' }, [E('summary', { 'style': 'cursor:pointer;' }, _('Parser details')), ...listDetails])
-		]));
+			E('div', { 'style': 'display:grid;gap:8px;' }, [
+				listSection(_('IP-CIDR list without conditions'), whitelist.total && whitelistActive ? 'ok' : whitelist.total ? 'error' : 'unknown', fakeStatus,
+					_('CIDR entries: %d · Providers: %d').format(whitelist.total, whitelist.providers.length), fakeNote),
+				listSection(_('IP-CIDR list with AND conditions'), !groupedEnabled || !grouped.total ? 'unknown' : groupedActive ? 'ok' : 'error', groupedStatus, groupedMetrics, groupedNote)
+			])
+		]);
 
 		const modeLabel = proxyMode === 'mixed' ? 'MIXED' : proxyMode === 'tun' ? 'TUN' : proxyMode === 'tproxy' ? 'TPROXY' : _('Unknown');
 		const modeChecks = proxyMode === 'mixed'
