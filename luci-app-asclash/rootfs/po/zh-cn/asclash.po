@@ -506,6 +506,9 @@ msgstr "Mihomo 未运行；provider 检查尚未开始"
 msgid "On a virtual TUN interface, state UNKNOWN alone is not an error. Check the UP flag and active route as well."
 msgstr "虚拟 TUN 接口显示 state UNKNOWN 本身并不表示错误；还应检查 UP 标志和活动路由。"
 
+msgid "Prizrak-Core"
+msgstr "Prizrak-Core"
+
 msgid "Please wait"
 msgstr "请稍候"
 

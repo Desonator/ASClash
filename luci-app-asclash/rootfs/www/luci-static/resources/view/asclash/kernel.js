@@ -5,7 +5,7 @@
 'require view.asclash.utils';
 
 const OFFICIAL_REPO = 'MetaCubeX/mihomo';
-const DEFAULT_CUSTOM_REPO = 'legiz-ru/Prizrak-Core';
+const PRIZRAK_REPO = 'legiz-ru/Prizrak-Core';
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 function isRussianUi() {
@@ -197,9 +197,10 @@ function createKernelManagementSection() {
 	container.appendChild(E('div', { 'class': 'cbi-section-descr' }, _('Download and manage the Mihomo (Clash Meta) kernel binary.')));
 	const sourceSelect = E('select', { 'class': 'cbi-input-select' }, [
 		E('option', { value: 'official' }, localized('Official Mihomo', 'Официальный Mihomo')),
+		E('option', { value: 'prizrak' }, _('Prizrak-Core')),
 		E('option', { value: 'custom' }, localized('Custom GitHub release', 'Свой релиз GitHub'))
 	]);
-	const repoInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: DEFAULT_CUSTOM_REPO, style: 'min-width: 220px;' });
+	const repoInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'owner/repository', style: 'min-width: 220px;' });
 	const saveButton = E('button', { class: 'btn' }, localized('Save release source', 'Сохранить источник'));
 	const status = E('div', { style: `margin: 15px 0; padding: 12px; border: 1px solid ${border}; border-radius: 4px; background: ${card}; color: ${text};` }, localized('Checking kernel status...', 'Проверка состояния ядра...'));
 	const downloadButton = E('button', { class: 'btn' }, _('Download Latest Kernel'));
@@ -293,15 +294,18 @@ function createKernelManagementSection() {
 	}
 	readRepository().then(value => {
 		repo = value;
-		const official = repo.toLowerCase() === OFFICIAL_REPO.toLowerCase();
-		sourceSelect.value = official ? 'official' : 'custom';
-		repoInput.value = official ? DEFAULT_CUSTOM_REPO : repo;
-		repoInput.style.display = official ? 'none' : '';
+		const normalizedRepo = repo.toLowerCase();
+		const source = normalizedRepo === OFFICIAL_REPO.toLowerCase() ? 'official'
+			: normalizedRepo === PRIZRAK_REPO.toLowerCase() ? 'prizrak' : 'custom';
+		sourceSelect.value = source;
+		repoInput.value = source === 'custom' ? repo : '';
+		repoInput.style.display = source === 'custom' ? '' : 'none';
 		refresh();
 	}).catch(refresh);
 	sourceSelect.addEventListener('change', () => { repoInput.style.display = sourceSelect.value === 'custom' ? '' : 'none'; });
 	saveButton.addEventListener('click', async () => {
-		const nextRepo = sourceSelect.value === 'official' ? OFFICIAL_REPO : repoInput.value.trim();
+		const nextRepo = sourceSelect.value === 'official' ? OFFICIAL_REPO
+			: sourceSelect.value === 'prizrak' ? PRIZRAK_REPO : repoInput.value.trim();
 		if (!REPO_PATTERN.test(nextRepo)) {
 			ui.addNotification(null, E('p', _('Enter a GitHub repository as owner/repository.')), 'error');
 			return;
