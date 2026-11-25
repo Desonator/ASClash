@@ -6,6 +6,7 @@
                 "/etc/openwrt_release": [ "read" ],
                 "/opt/clash/config.yaml": [ "read" ],
                 "/opt/clash/settings": [ "read" ],
+                "/etc/config/dhcp": [ "read" ],
                 "/opt/clash/bin/clash": [ "read", "stat", "exec" ],
                 "/opt/clash/bin/clash-rules": [ "read", "stat", "exec" ],
                 "/opt/clash/lst/": [ "list" ],

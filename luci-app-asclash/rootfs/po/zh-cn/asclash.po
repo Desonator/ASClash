@@ -890,6 +890,18 @@ msgstr "自动接口检测"
 msgid "Additional Settings"
 msgstr "其他设置"
 
+msgid "Exceptions for permanent DHCP leases"
+msgstr "固定 DHCP 租约设备例外"
+
+msgid "Selected devices will bypass the proxy and use direct routing. Only static host reservations with a MAC address and IPv4 address are listed."
+msgstr "所选设备将绕过代理并直接连接互联网。列表仅包含同时配置 MAC 地址和 IPv4 地址的静态主机记录。"
+
+msgid "No permanent DHCP reservations with MAC and IPv4 address were found."
+msgstr "未找到包含 MAC 地址和 IPv4 地址的固定 DHCP 租约。"
+
+msgid "Failed to load permanent DHCP leases:"
+msgstr "无法加载固定 DHCP 租约："
+
 msgid "Show Smart group weights"
 msgstr "显示 Smart 组权重"
 
