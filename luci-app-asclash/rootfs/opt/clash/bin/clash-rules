@@ -58,9 +58,25 @@ readonly GROUPED_FAKEIP_STATS_FILE="/tmp/clash/fakeip_port_groups.stats"
 readonly GROUPED_FAKEIP_BATCH_DIGEST_FILE="/tmp/clash/fakeip_port_groups.nft.digest"
 readonly GROUPED_FAKEIP_BATCH_CHECKSUM_FILE="/tmp/clash/fakeip_port_groups.nft.md5"
 readonly GROUPED_FAKEIP_APPLIED_DIGEST_FILE="/tmp/clash/fakeip_port_groups.applied.digest"
+readonly GROUPED_FAKEIP_MISSING_SOURCES_FILE="/tmp/clash/fakeip_port_missing_sources.txt"
 readonly CLASH_RULES_UPDATE_LOCK="/tmp/clash/clash-rules-update.lock"
 readonly ASCLASH_LIST_PROGRESS_FILE="/tmp/clash/asclash-list-progress"
+readonly ASCLASH_LIST_DIAGNOSTICS_FILE="/tmp/clash/asclash-list-diagnostics.txt"
 ASCLASH_PROGRESS_ID=""
+ASCLASH_LIST_CYCLE_ID=""
+ASCLASH_LIST_CYCLE_PHASE="unknown"
+ASCLASH_LIST_CYCLE_TRIGGER="unknown"
+ASCLASH_LIST_CYCLE_TIME=0
+ASCLASH_LIST_CYCLE_ACTIVE="false"
+ASCLASH_FAKEIP_STATE="unknown"
+ASCLASH_FAKEIP_FALLBACK="false"
+ASCLASH_FAKEIP_ISSUES=""
+ASCLASH_GROUPED_STATE="unknown"
+ASCLASH_GROUPED_FALLBACK="false"
+AUTO_FAKEIP_ISSUES=""
+FAKEIP_REFRESH_STATE="ready"
+FAKEIP_REFRESH_FALLBACK="false"
+FAKEIP_REFRESH_ISSUES=""
 # Markers delimit the auto-generated block inside the fakeip whitelist file.
 # Everything outside the markers is preserved on each refresh.
 readonly FAKEIP_AUTO_BEGIN="# AUTO-BEGIN: generated from rule-providers — do not edit between markers"
@@ -164,6 +180,47 @@ set_list_progress() {
     local tmp_file="${ASCLASH_LIST_PROGRESS_FILE}.$$"
     printf '%s|%s|%s\n' "$ASCLASH_PROGRESS_ID" "$phase" "$updated_at" > "$tmp_file" || return 1
     mv -f "$tmp_file" "$ASCLASH_LIST_PROGRESS_FILE"
+}
+
+write_list_diagnostics() {
+    local tmp_file="${ASCLASH_LIST_DIAGNOSTICS_FILE}.$$" provider path reason
+    mkdir -p "$(dirname "$ASCLASH_LIST_DIAGNOSTICS_FILE")" 2>/dev/null || return 1
+    {
+        printf 'cycle|%s|%s|%s\n' "$ASCLASH_LIST_CYCLE_PHASE" "$ASCLASH_LIST_CYCLE_TIME" "$ASCLASH_LIST_CYCLE_TRIGGER"
+        printf 'fakeip|%s|%s\n' "$ASCLASH_FAKEIP_STATE" "$ASCLASH_FAKEIP_FALLBACK"
+        printf '%s\n' "$ASCLASH_FAKEIP_ISSUES" | while IFS='|' read -r provider path reason; do
+            [ -n "$provider$path$reason" ] || continue
+            printf 'fakeip_issue|%s|%s|%s\n' \
+                "$(printf '%s' "$provider" | tr '|\r\n' '   ')" \
+                "$(printf '%s' "$path" | tr '|\r\n' '   ')" \
+                "$(printf '%s' "$reason" | tr '|\r\n' '   ')"
+        done
+        printf 'grouped|%s|%s\n' "$ASCLASH_GROUPED_STATE" "$ASCLASH_GROUPED_FALLBACK"
+        if [ -s "$GROUPED_FAKEIP_MISSING_SOURCES_FILE" ]; then
+            while IFS='|' read -r provider path reason; do
+                [ -n "$provider$path$reason" ] || continue
+                printf 'grouped_issue|%s|%s|%s\n' \
+                    "$(printf '%s' "$provider" | tr '|\r\n' '   ')" \
+                    "$(printf '%s' "$path" | tr '|\r\n' '   ')" \
+                    "$(printf '%s' "$reason" | tr '|\r\n' '   ')"
+            done < "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
+        fi
+    } > "$tmp_file" || { rm -f "$tmp_file"; return 1; }
+    mv -f "$tmp_file" "$ASCLASH_LIST_DIAGNOSTICS_FILE"
+}
+
+begin_list_diagnostics() {
+    ASCLASH_LIST_CYCLE_ID="${2:-cycle-$$}"
+    ASCLASH_LIST_CYCLE_PHASE="$1"
+    ASCLASH_LIST_CYCLE_TRIGGER="${3:-startup}"
+    ASCLASH_LIST_CYCLE_TIME=$(date +%s 2>/dev/null)
+    case "$ASCLASH_LIST_CYCLE_TIME" in ''|*[!0-9]*) ASCLASH_LIST_CYCLE_TIME=0 ;; esac
+    ASCLASH_FAKEIP_STATE="$1"
+    ASCLASH_FAKEIP_FALLBACK="false"
+    ASCLASH_FAKEIP_ISSUES=""
+    ASCLASH_GROUPED_STATE="$1"
+    ASCLASH_GROUPED_FALLBACK="false"
+    write_list_diagnostics
 }
 
 # Function to log warnings
@@ -1100,6 +1157,7 @@ clear_grouped_port_artifacts() {
         /tmp/clash/fakeip_port_groups.stats \
         /tmp/clash/fakeip_port_groups.nft.digest \
         /tmp/clash/fakeip_port_groups.nft.md5 \
+        "$GROUPED_FAKEIP_MISSING_SOURCES_FILE" \
         /tmp/clash/fakeip_port_rules_summary \
         /tmp/clash/fakeip_port_provider_sources \
         /tmp/clash/fakeip_port_ui_rows \
@@ -1162,6 +1220,7 @@ EOF
         msg "Grouped fakeip sources unchanged, skipping regeneration"
         return 0
     fi
+    : > "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
     auto_file="/tmp/clash/fakeip_auto_entries.$$"
     metadata="/tmp/clash/fakeip_port_groups"
     summary="/tmp/clash/fakeip_port_rules_summary"
@@ -1270,7 +1329,11 @@ EOF
                 RULE-SET)
                     provider="$operand_value"
                     provider_line=$(printf '%s\n' "$providers" | awk -F'|' -v n="$provider" '$1 == n { print; exit }')
-                    [ -n "$provider_line" ] || { missing_operand=true; break; }
+                    if [ -z "$provider_line" ]; then
+                        printf '%s||undefined\n' "$provider" >> "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
+                        missing_operand=true
+                        break
+                    fi
                     behavior=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $2}')
                     path=$(printf '%s\n' "$provider_line" | awk -F'|' '{print $4}')
                     case "$path" in
@@ -1278,13 +1341,18 @@ EOF
                         /*) full_path="$path" ;;
                         *) full_path="$base_dir/$path" ;;
                     esac
-                    [ -s "$full_path" ] || { missing_operand=true; break; }
+                    if [ ! -s "$full_path" ]; then
+                        printf '%s|%s|missing\n' "$provider" "$full_path" >> "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
+                        missing_operand=true
+                        break
+                    fi
                     provider_cache_key=$(printf '%s|%s|%s' "$provider" "$behavior" "$full_path" | md5sum 2>/dev/null | awk '{print $1}')
                     provider_cache="/tmp/clash/fakeip_provider_${provider_cache_key}.cidr"
                     if [ ! -f "$provider_cache" ]; then
                         provider_raw="${provider_cache}.raw.$$"
                         if ! extract_ipv4_cidr_from_rule_provider_file "$full_path" "$behavior" > "$provider_raw"; then
                             rm -f "$provider_raw" "$provider_cache"
+                            printf '%s|%s|parse-error\n' "$provider" "$full_path" >> "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
                             missing_operand=true
                             break
                         fi
@@ -2016,6 +2084,7 @@ get_fakeip_whitelist_provider_names() {
 generate_fakeip_whitelist_auto() {
 	AUTO_FAKEIP_SOURCES=""
 	AUTO_FAKEIP_INCOMPLETE="false"
+	AUTO_FAKEIP_ISSUES=""
 
 	local proxy_sets inline_cidrs
 	proxy_sets=$(get_fakeip_whitelist_provider_names)
@@ -2030,6 +2099,7 @@ generate_fakeip_whitelist_auto() {
     providers=$(extract_rule_providers)
     if [ -n "$proxy_sets" ] && [ -z "$providers" ]; then
         AUTO_FAKEIP_INCOMPLETE="true"
+        AUTO_FAKEIP_ISSUES="*||providers-unavailable"
         msg "Auto fakeip whitelist: rule-providers are referenced but none could be parsed"
         return 0
     fi
@@ -2058,7 +2128,7 @@ generate_fakeip_whitelist_auto() {
         provider_line=$(echo "$providers" | awk -F'|' -v n="$set_name" '$1 == n { print; exit }')
         if [ -z "$provider_line" ]; then
             msg "Auto fakeip whitelist: provider '$set_name' is referenced but not defined (skipped)"
-            echo "$set_name" >> "$tmp_incomplete"
+            printf '%s||undefined\n' "$set_name" >> "$tmp_incomplete"
             continue
         fi
 
@@ -2075,7 +2145,7 @@ generate_fakeip_whitelist_auto() {
 
         if [ ! -f "$full_path" ]; then
             msg "Auto fakeip whitelist: provider '$set_name' file not found: $full_path (skipped)"
-            echo "$set_name" >> "$tmp_incomplete"
+            printf '%s|%s|missing\n' "$set_name" "$full_path" >> "$tmp_incomplete"
             continue
         fi
 
@@ -2084,7 +2154,7 @@ generate_fakeip_whitelist_auto() {
         local rc=$?
         if [ "$rc" -ne 0 ]; then
             msg "Auto fakeip whitelist: provider '$set_name' could not be parsed: $full_path (skipped)"
-            echo "$set_name" >> "$tmp_incomplete"
+            printf '%s|%s|parse-error\n' "$set_name" "$full_path" >> "$tmp_incomplete"
             continue
         fi
         if [ -n "$entries" ]; then
@@ -2116,6 +2186,7 @@ generate_fakeip_whitelist_auto() {
     fi
     if [ -s "$tmp_incomplete" ]; then
         AUTO_FAKEIP_INCOMPLETE="true"
+        AUTO_FAKEIP_ISSUES=$(cat "$tmp_incomplete")
     fi
 
     mkdir -p "$(dirname "$FAKEIP_WHITELIST_SUMMARY_FILE")" 2>/dev/null
@@ -3554,20 +3625,42 @@ teardown_routing_rules() {
 # Skipped entirely when AUTO_FAKEIP_WHITELIST is not "true" or when the current
 # fake-ip-filter-mode is neither whitelist nor rule.
 refresh_fakeip_whitelist_file() {
-    [ "$AUTO_FAKEIP_WHITELIST" = "true" ] || return 0
-    is_ipcidr_whitelist_mode || return 0
+	FAKEIP_REFRESH_STATE="ready"
+	FAKEIP_REFRESH_FALLBACK="false"
+	FAKEIP_REFRESH_ISSUES=""
+	[ "$AUTO_FAKEIP_WHITELIST" = "true" ] || { FAKEIP_REFRESH_STATE="manual"; return 0; }
+	is_ipcidr_whitelist_mode || { FAKEIP_REFRESH_STATE="disabled"; return 0; }
 
     # Fast-path digest must include the selected providers/rules as well as
     # their files. Hashing every provider file alone misses config rule changes
     # when the set of available provider files stays the same.
     local _fp_base_dir _fp_digest_file _fp_current_digest _fp_saved_digest
-    local _fp_selected _fp_providers _fp_inline _fp_summary_count existing_auto_count
+    local _fp_selected _fp_providers _fp_inline _fp_summary_count existing_auto_count _fp_issues_file _fp_provider_line _fp_path _fp_full_path
     _fp_base_dir=$(get_providers_base_dir)
     _fp_digest_file="/opt/clash/lst/mrs_cache/.whitelist_src_digest"
     mkdir -p /opt/clash/lst/mrs_cache 2>/dev/null
     _fp_selected=$(get_fakeip_whitelist_provider_names)
     _fp_inline=$(extract_proxy_ip_cidr_rules)
     _fp_providers=$(extract_rule_providers)
+    _fp_issues_file="/tmp/clash/fakeip_whitelist_source_issues.$$"
+    mkdir -p /tmp/clash 2>/dev/null
+    : > "$_fp_issues_file"
+    printf '%s\n' "$_fp_selected" | while IFS= read -r _fp_name; do
+        [ -n "$_fp_name" ] || continue
+        _fp_provider_line=$(printf '%s\n' "$_fp_providers" | awk -F'|' -v n="$_fp_name" '$1 == n { print; exit }')
+        if [ -z "$_fp_provider_line" ]; then
+            printf '%s||undefined\n' "$_fp_name" >> "$_fp_issues_file"
+            continue
+        fi
+        _fp_path=$(printf '%s\n' "$_fp_provider_line" | awk -F'|' '{print $4}')
+        case "$_fp_path" in
+            ./*) _fp_full_path="$_fp_base_dir/${_fp_path#./}" ;;
+            /*) _fp_full_path="$_fp_path" ;;
+            *) _fp_full_path="$_fp_base_dir/$_fp_path" ;;
+        esac
+        [ -f "$_fp_full_path" ] || printf '%s|%s|missing\n' "$_fp_name" "$_fp_full_path" >> "$_fp_issues_file"
+    done
+    FAKEIP_REFRESH_ISSUES=$(cat "$_fp_issues_file" 2>/dev/null)
     _fp_current_digest=$(
         {
             printf 'generator=3\nmode=%s\nselected=%s\ninline-ipcidr=%s\n' \
@@ -3620,6 +3713,15 @@ refresh_fakeip_whitelist_file() {
        && [ -n "$_fp_summary_count" ] \
        && [ "$_fp_summary_count" = "${existing_auto_count:-0}" ]; then
         msg "Auto fakeip whitelist sources unchanged, skipping regeneration"
+        if [ -s "$_fp_issues_file" ]; then
+            if [ "${existing_auto_count:-0}" -gt 0 ]; then
+                FAKEIP_REFRESH_STATE="fallback"
+                FAKEIP_REFRESH_FALLBACK="true"
+            else
+                FAKEIP_REFRESH_STATE="partial"
+            fi
+        fi
+        rm -f "$_fp_issues_file"
         return 0
     fi
 
@@ -3637,6 +3739,8 @@ refresh_fakeip_whitelist_file() {
     generate_fakeip_whitelist_auto > "$tmp_auto"
     auto_entries=$(cat "$tmp_auto" 2>/dev/null)
     rm -f "$tmp_auto"
+    FAKEIP_REFRESH_ISSUES="$AUTO_FAKEIP_ISSUES"
+    rm -f "$_fp_issues_file"
 
     if [ "$AUTO_FAKEIP_INCOMPLETE" = "true" ] && [ "${existing_auto_count:-0}" -gt 0 ]; then
         if [ -f "$summary_backup" ]; then
@@ -3645,9 +3749,13 @@ refresh_fakeip_whitelist_file() {
             rm -f "$FAKEIP_WHITELIST_SUMMARY_FILE"
         fi
         msg "WARNING: Auto fakeip whitelist generation incomplete; keeping existing generated block ($existing_auto_count entries)"
+        FAKEIP_REFRESH_STATE="fallback"
+        FAKEIP_REFRESH_FALLBACK="true"
         return 0
     fi
     rm -f "$summary_backup"
+
+    [ "$AUTO_FAKEIP_INCOMPLETE" = "true" ] && FAKEIP_REFRESH_STATE="partial"
 
     mkdir -p "$(dirname "$FAKEIP_WHITELIST_FILE")" 2>/dev/null
 
@@ -3727,6 +3835,9 @@ update_fakeip_whitelist_sets() {
     fi
 
     if [ "$fake_ip_filter_mode" != "whitelist" ] && [ "$fake_ip_filter_mode" != "rule" ]; then
+        ASCLASH_FAKEIP_STATE="disabled"
+        ASCLASH_FAKEIP_ISSUES=""
+        ASCLASH_GROUPED_STATE="disabled"
         msg "fake-ip-filter-mode is '${fake_ip_filter_mode:-blacklist}', not 'whitelist'/'rule' — clearing fakeip sets if they exist"
         set_list_progress "applying"
         rm -f "$FAKEIP_WHITELIST_DIGEST_FILE" 2>/dev/null
@@ -3747,14 +3858,28 @@ update_fakeip_whitelist_sets() {
     # identically to the start() path.
     FAKE_IP_FILTER_MODE="$fake_ip_filter_mode"
     refresh_fakeip_whitelist_file
+    ASCLASH_FAKEIP_ISSUES="$FAKEIP_REFRESH_ISSUES"
+    ASCLASH_FAKEIP_FALLBACK="$FAKEIP_REFRESH_FALLBACK"
+    ASCLASH_FAKEIP_STATE="$FAKEIP_REFRESH_STATE"
     FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
     # The generator writes only files and logger summaries.  Keep any
     # accidental stdout from nested provider converters out of SSH output.
     generate_grouped_port_sources >/dev/null || {
         warn "Grouped IP-CIDR rule generation failed; refusing to update the active whitelist set"
+        ASCLASH_FAKEIP_STATE="error"
+        ASCLASH_GROUPED_STATE="error"
         set_list_progress "failed"
         return 1
     }
+    if [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" != "true" ]; then
+        ASCLASH_GROUPED_STATE="disabled"
+    elif [ -s "$GROUPED_FAKEIP_MISSING_SOURCES_FILE" ]; then
+        ASCLASH_GROUPED_STATE="partial"
+    elif [ -s /tmp/clash/fakeip_port_groups ]; then
+        ASCLASH_GROUPED_STATE="generated"
+    else
+        ASCLASH_GROUPED_STATE="empty"
+    fi
 
     # Skip nft/ipset flush+repopulate when the normalized CIDR list matches what
     # we last applied (digest in tmpfs). Saves kernel work; digest is cleared on
@@ -3772,6 +3897,11 @@ update_fakeip_whitelist_sets() {
     [ -f "$FAKEIP_WHITELIST_DIGEST_FILE" ] && prev_digest=$(tr -d '\r\n' < "$FAKEIP_WHITELIST_DIGEST_FILE")
     if [ -n "$prev_digest" ] && [ "$current_digest" = "$prev_digest" ]; then
         msg "Fakeip whitelist kernel sets unchanged (same CIDR digest, skipping nft/ipset rewrite)"
+        case "$ASCLASH_FAKEIP_STATE" in
+            fallback|partial) ;;
+            manual) ASCLASH_FAKEIP_STATE="applied-manual" ;;
+            *) ASCLASH_FAKEIP_STATE="applied" ;;
+        esac
         return 0
     fi
 
@@ -3807,31 +3937,48 @@ update_fakeip_whitelist_sets() {
             else
                 rm -f "$nft_batch"
                 msg "ERROR: Failed to update nft fakeip_whitelist set; keeping previous set contents"
+                ASCLASH_FAKEIP_STATE="error"
                 set_list_progress "failed"
                 return 1
             fi
-            printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"
+            if ! printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"; then
+                ASCLASH_FAKEIP_STATE="error"
+                set_list_progress "failed"
+                return 1
+            fi
         else
             msg "WARNING: nft set inet clash fakeip_whitelist not found — is the clash-rules firewall active?"
+            ASCLASH_FAKEIP_STATE="error"
             set_list_progress "failed"
             return 1
         fi
     elif hash iptables 2>/dev/null; then
         if hash ipset 2>/dev/null; then
-            ensure_fakeip_ipset && populate_fakeip_ipset_from_file && \
-                printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"
+            if ! ensure_fakeip_ipset || ! populate_fakeip_ipset_from_file \
+               || ! printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"; then
+                ASCLASH_FAKEIP_STATE="error"
+                set_list_progress "failed"
+                return 1
+            fi
         else
             msg "ERROR: ipset not available for iptables fakeip whitelist update"
+            ASCLASH_FAKEIP_STATE="error"
             set_list_progress "failed"
             return 1
         fi
     else
         msg "ERROR: Neither nftables nor iptables found"
+        ASCLASH_FAKEIP_STATE="error"
         set_list_progress "failed"
         return 1
     fi
 
     msg "Fakeip whitelist sets updated successfully"
+    case "$ASCLASH_FAKEIP_STATE" in
+        fallback|partial) ;;
+        manual) ASCLASH_FAKEIP_STATE="applied-manual" ;;
+        *) ASCLASH_FAKEIP_STATE="applied" ;;
+    esac
 }
 
 # Add/replace the TUN device route in its policy routing table.
@@ -3985,6 +4132,9 @@ start() {
     msg "Starting Clash rules script"
     [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="start-$$"
     set_list_progress "building"
+    if [ "$ASCLASH_LIST_CYCLE_ACTIVE" != "true" ]; then
+        begin_list_diagnostics "waiting" "start-$$" "service-start"
+    fi
 
     # Check if config file exists before proceeding
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -4176,6 +4326,87 @@ stop() {
     msg "Clash rules script stopped successfully (all routing rules cleaned up)"
 }
 
+finalize_grouped_list_diagnostics() {
+    local generated_groups generated_cidrs source_digest applied_digest
+    if [ "$ASCLASH_GROUPED_STATE" = "disabled" ] || [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" != "true" ]; then
+        ASCLASH_GROUPED_STATE="disabled"
+        return
+    fi
+    if [ -s "$GROUPED_FAKEIP_MISSING_SOURCES_FILE" ]; then
+        ASCLASH_GROUPED_STATE="partial"
+        return
+    fi
+    generated_groups=0
+    generated_cidrs=0
+    if [ -s "$GROUPED_FAKEIP_STATS_FILE" ]; then
+        IFS='|' read -r generated_groups generated_cidrs < "$GROUPED_FAKEIP_STATS_FILE"
+    fi
+    if [ "${generated_groups:-0}" -eq 0 ]; then
+        ASCLASH_GROUPED_STATE="empty"
+        return
+    fi
+    if [ "$GROUPED_FAKEIP_PORT_RULES_DRY_RUN" = "true" ]; then
+        ASCLASH_GROUPED_STATE="not-applied"
+        return
+    fi
+    source_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+    applied_digest=$(cat "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE" 2>/dev/null)
+    if [ -n "$source_digest" ] && [ "$source_digest" = "$applied_digest" ]; then
+        ASCLASH_GROUPED_STATE="applied"
+    else
+        ASCLASH_GROUPED_STATE="error"
+    fi
+}
+
+run_update_cycle() {
+    local trigger="$1" readiness="$2" old_grouped_digest new_grouped_digest update_rc
+    acquire_update_lock || return 0
+    ASCLASH_PROGRESS_ID="update-$$"
+    ASCLASH_LIST_CYCLE_ACTIVE="true"
+    begin_list_diagnostics "checking" "update-$$" "$trigger"
+    set_list_progress "building"
+    old_grouped_digest=""
+    [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && old_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+    update_rules
+    update_rc=$?
+    if [ "$update_rc" -ne 0 ]; then
+        set_list_progress "failed"
+        [ "$ASCLASH_FAKEIP_STATE" = "checking" ] && ASCLASH_FAKEIP_STATE="error"
+        [ "$ASCLASH_GROUPED_STATE" = "checking" ] && ASCLASH_GROUPED_STATE="error"
+    fi
+    if [ "$update_rc" -eq 0 ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
+        new_grouped_digest=""
+        [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+        if [ -n "$new_grouped_digest" ] && [ "$new_grouped_digest" != "$old_grouped_digest" ]; then
+            if hash nft 2>/dev/null; then
+                msg "Grouped fakeip sources changed, rebuilding nftables rules"
+                rm -f /tmp/clash/fakeip_port_groups.nft
+                start || update_rc=$?
+            else
+                msg "Grouped fakeip sources changed; nftables is unavailable, skipping grouped-rule rebuild"
+                ASCLASH_GROUPED_STATE="error"
+            fi
+        else
+            msg "Grouped fakeip sources unchanged, keeping active nftables rules"
+        fi
+    fi
+    [ "$update_rc" -ne 0 ] || set_list_progress "applied"
+    finalize_grouped_list_diagnostics
+    ASCLASH_LIST_CYCLE_TIME=$(date +%s 2>/dev/null)
+    case "$ASCLASH_LIST_CYCLE_TIME" in ''|*[!0-9]*) ASCLASH_LIST_CYCLE_TIME=0 ;; esac
+    if [ "$update_rc" -ne 0 ]; then
+        ASCLASH_LIST_CYCLE_PHASE="failed"
+    elif [ "$readiness" = "timeout" ]; then
+        ASCLASH_LIST_CYCLE_PHASE="timeout"
+    else
+        ASCLASH_LIST_CYCLE_PHASE="complete"
+    fi
+    write_list_diagnostics || warn "Could not save the last rule-list diagnostics report"
+    ASCLASH_LIST_CYCLE_ACTIVE="false"
+    release_update_lock
+    return "$update_rc"
+}
+
 case "$1" in
     start)
         start
@@ -4188,49 +4419,35 @@ case "$1" in
         start
         ;;
     update)
-        acquire_update_lock || exit 0
-        ASCLASH_PROGRESS_ID="update-$$"
-        set_list_progress "building"
-        old_grouped_digest=""
-        [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && old_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
-        update_rules
-        update_rc=$?
-        if [ "$update_rc" -ne 0 ]; then
-            set_list_progress "failed"
-        fi
-        if [ "$update_rc" -eq 0 ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
-            new_grouped_digest=""
-            [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
-            if [ -n "$new_grouped_digest" ] && [ "$new_grouped_digest" != "$old_grouped_digest" ]; then
-                if hash nft 2>/dev/null; then
-                    msg "Grouped fakeip sources changed, rebuilding nftables rules"
-                    # update_rules() refreshes grouped CIDR sources/digest before
-                    # this point. Invalidate the old batch so start() cannot take
-                    # the digest fast-path and apply a batch built from old data.
-                    rm -f /tmp/clash/fakeip_port_groups.nft
-                    start || update_rc=$?
-                else
-                    msg "Grouped fakeip sources changed; nftables is unavailable, skipping grouped-rule rebuild"
-                fi
-            else
-                msg "Grouped fakeip sources unchanged, keeping active nftables rules"
-            fi
-        fi
-        [ "$update_rc" -ne 0 ] || set_list_progress "applied"
-        release_update_lock
-        exit "$update_rc"
+        run_update_cycle "update" "ready"
+        exit $?
+        ;;
+    post-start-update)
+        readiness="${2:-timeout}"
+        case "$readiness" in ready|timeout) ;; *) readiness="timeout" ;; esac
+        run_update_cycle "post-start" "$readiness"
+        exit $?
         ;;
     update-ip-whitelist)
         acquire_update_lock || exit 0
         ASCLASH_PROGRESS_ID="whitelist-$$"
+        ASCLASH_LIST_CYCLE_ACTIVE="true"
+        begin_list_diagnostics "checking" "whitelist-$$" "whitelist-update"
         set_list_progress "building"
         update_fakeip_whitelist_sets
         update_rc=$?
         if [ "$update_rc" -eq 0 ]; then
             set_list_progress "applied"
+            finalize_grouped_list_diagnostics
+            ASCLASH_LIST_CYCLE_PHASE="complete"
         else
             set_list_progress "failed"
+            ASCLASH_LIST_CYCLE_PHASE="failed"
         fi
+        ASCLASH_LIST_CYCLE_TIME=$(date +%s 2>/dev/null)
+        case "$ASCLASH_LIST_CYCLE_TIME" in ''|*[!0-9]*) ASCLASH_LIST_CYCLE_TIME=0 ;; esac
+        write_list_diagnostics || warn "Could not save the last rule-list diagnostics report"
+        ASCLASH_LIST_CYCLE_ACTIVE="false"
         release_update_lock
         exit "$update_rc"
         ;;
@@ -4284,7 +4501,7 @@ case "$1" in
         exit $?
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|update|update-ip-whitelist|rule-providers-ready|tun_route_setup|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
+        echo "Usage: $0 {start|stop|restart|update|post-start-update [ready|timeout]|update-ip-whitelist|rule-providers-ready|tun_route_setup|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
         exit 1
         ;;
 esac

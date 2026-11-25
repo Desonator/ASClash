@@ -441,6 +441,72 @@ msgstr "Принято: %d · Пропущено: %d · nft-наборов: %d �
 msgid "Accepted: — · Skipped: — · nft sets: %d · CIDR entries: %d"
 msgstr "Принято: — · Пропущено: — · nft-наборов: %d · Записей CIDR: %d"
 
+msgid "Waiting for provider files"
+msgstr "Ожидание файлов rule-provider-ов"
+
+msgid "Checking provider files"
+msgstr "Проверка готовности rule-provider-ов"
+
+msgid "Provider wait timed out"
+msgstr "Истекло время ожидания файлов provider-ов"
+
+msgid "List update failed"
+msgstr "Не удалось обновить списки"
+
+msgid "Completed with warnings"
+msgstr "Завершено с предупреждениями"
+
+msgid "Waiting for providers"
+msgstr "Ожидание provider-ов"
+
+msgid "Previous list retained"
+msgstr "Оставлен предыдущий список"
+
+msgid "Partially applied"
+msgstr "Применён частично"
+
+msgid "Update failed"
+msgstr "Ошибка обновления"
+
+msgid "Manual list applied"
+msgstr "Применён список вручную"
+
+msgid "Generated, not applied"
+msgstr "Сформировано, но не применено"
+
+msgid "Provider files are unavailable; the previous list was retained."
+msgstr "Файлы provider-ов недоступны; сохранён предыдущий список."
+
+msgid "Some sources were not included in the generated list."
+msgstr "Некоторые источники не вошли в сформированный список."
+
+msgid "The list update failed; check these provider sources."
+msgstr "Не удалось обновить список; проверьте эти источники provider-ов."
+
+msgid "Affected providers: %d"
+msgstr "Затронуто provider-ов: %d"
+
+msgid "Show provider files"
+msgstr "Показать файлы provider-ов"
+
+msgid "Unknown provider"
+msgstr "Неизвестный provider"
+
+msgid "file not found"
+msgstr "файл не найден"
+
+msgid "No rule-provider definitions could be parsed."
+msgstr "Не удалось разобрать объявления rule-provider-ов."
+
+msgid "rule-provider definitions are unavailable"
+msgstr "объявления rule-provider-ов недоступны"
+
+msgid "Historical log messages (not used for current list status)"
+msgstr "Исторические сообщения журнала (не влияют на текущий статус списков)"
+
+msgid "Mihomo is not running; provider check has not started"
+msgstr "Mihomo не запущен; проверка provider-ов ещё не началась"
+
 msgid "Please wait"
 msgstr "Пожалуйста, подождите"
 

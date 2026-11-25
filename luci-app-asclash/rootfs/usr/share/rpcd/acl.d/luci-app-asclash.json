@@ -17,6 +17,8 @@
                 "/tmp/clash/fakeip_port_groups.stats": [ "read" ],
                 "/tmp/clash/fakeip_port_parser_diagnostics.txt": [ "read" ],
                 "/tmp/clash/asclash-list-progress": [ "read" ],
+                "/tmp/clash/asclash-list-diagnostics.txt": [ "read" ],
+                "/tmp/clash/fakeip_port_missing_sources.txt": [ "read" ],
                 "/proc/net/dev": [ "read" ],
                 "/proc/net/route": [ "read" ],
                 "/sys/class/net": [ "list" ],

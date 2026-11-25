@@ -409,14 +409,22 @@ service_started() {
 		(
 			sleep 5
 			attempt=0
+			providers_ready=0
 			while [ "$attempt" -lt 30 ]; do
 				pgrep -f "$CLASH_BIN -d $CLASH_DIR" >/dev/null 2>&1 || exit 0
-				"$CLASH_RULES" rule-providers-ready >/dev/null 2>&1 && break
+				if "$CLASH_RULES" rule-providers-ready >/dev/null 2>&1; then
+					providers_ready=1
+					break
+				fi
 				sleep 2
 				attempt=$((attempt + 1))
 			done
 			pgrep -f "$CLASH_BIN -d $CLASH_DIR" >/dev/null 2>&1 || exit 0
-			"$CLASH_RULES" update
+			if [ "$providers_ready" -eq 1 ]; then
+				"$CLASH_RULES" post-start-update ready
+			else
+				"$CLASH_RULES" post-start-update timeout
+			fi
 		) >/dev/null 2>&1 </dev/null &
 	fi
 }

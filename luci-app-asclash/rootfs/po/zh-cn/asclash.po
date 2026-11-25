@@ -437,6 +437,72 @@ msgstr "已接受：%d · 已跳过：%d · nft 集合：%d · CIDR 条目：%d"
 msgid "Accepted: — · Skipped: — · nft sets: %d · CIDR entries: %d"
 msgstr "已接受：— · 已跳过：— · nft 集合：%d · CIDR 条目：%d"
 
+msgid "Waiting for provider files"
+msgstr "正在等待 provider 文件"
+
+msgid "Checking provider files"
+msgstr "正在检查 provider 文件"
+
+msgid "Provider wait timed out"
+msgstr "等待 provider 文件超时"
+
+msgid "List update failed"
+msgstr "列表更新失败"
+
+msgid "Completed with warnings"
+msgstr "已完成，但存在警告"
+
+msgid "Waiting for providers"
+msgstr "正在等待 providers"
+
+msgid "Previous list retained"
+msgstr "保留了上一个列表"
+
+msgid "Partially applied"
+msgstr "已部分应用"
+
+msgid "Update failed"
+msgstr "更新失败"
+
+msgid "Manual list applied"
+msgstr "已应用手动列表"
+
+msgid "Generated, not applied"
+msgstr "已生成，尚未应用"
+
+msgid "Provider files are unavailable; the previous list was retained."
+msgstr "provider 文件不可用；已保留上一个列表。"
+
+msgid "Some sources were not included in the generated list."
+msgstr "生成的列表未包含部分来源。"
+
+msgid "The list update failed; check these provider sources."
+msgstr "列表更新失败；请检查这些 provider 来源。"
+
+msgid "Affected providers: %d"
+msgstr "受影响的 provider：%d"
+
+msgid "Show provider files"
+msgstr "显示 provider 文件"
+
+msgid "Unknown provider"
+msgstr "未知 provider"
+
+msgid "file not found"
+msgstr "文件未找到"
+
+msgid "No rule-provider definitions could be parsed."
+msgstr "无法解析 rule-provider 定义。"
+
+msgid "rule-provider definitions are unavailable"
+msgstr "rule-provider 定义不可用"
+
+msgid "Historical log messages (not used for current list status)"
+msgstr "历史日志消息（不用于当前列表状态）"
+
+msgid "Mihomo is not running; provider check has not started"
+msgstr "Mihomo 未运行；provider 检查尚未开始"
+
 msgid "Please wait"
 msgstr "请稍候"
 
