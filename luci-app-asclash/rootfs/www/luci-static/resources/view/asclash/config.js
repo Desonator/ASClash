@@ -5,6 +5,7 @@
 'require view.asclash.utils';
 
 let startStopButton = null;
+let restartButton = null;
 let editor = null;
 
 view_asclash_utils.bumpRpcTimeout();
@@ -61,6 +62,36 @@ async function toggleService() {
             notifyRestartPending();
         }
     } finally {
+        if (startStopButton) startStopButton.disabled = false;
+    }
+}
+
+async function restartService() {
+    if (restartButton) restartButton.disabled = true;
+    if (startStopButton) startStopButton.disabled = true;
+    try {
+        const wasRunning = await getServiceStatus();
+        const progressBefore = await view_asclash_utils.getListProgress();
+        await view_asclash_utils.execDetached('/etc/init.d/clash restart');
+        ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+        watchListProgress(progressBefore);
+
+        if (wasRunning && !await view_asclash_utils.waitForServiceStatus(getServiceStatus, false, 15000)) {
+            notifyRestartPending();
+            return;
+        }
+        const running = await view_asclash_utils.waitForServiceStatus(getServiceStatus, true, 90000);
+        if (!running) {
+            notifyRestartPending();
+            return;
+        }
+
+        if (startStopButton) startStopButton.textContent = _('Stop Service');
+        ui.addNotification(null, E('p', _('Clash service restarted successfully.')), 'info');
+    } catch (e) {
+        ui.addNotification(null, E('p', _('Failed to restart Clash service: %s').format(e.message)), 'error');
+    } finally {
+        if (restartButton) restartButton.disabled = false;
         if (startStopButton) startStopButton.disabled = false;
     }
 }
@@ -201,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.1';
+const ASCLASH_VERSION = '4.8.2.6';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -475,22 +506,29 @@ return view.extend({
 
         const view = E([
             E('div', {
-                'style': 'margin-bottom: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;'
+                'style': 'margin: 0 0 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;'
             }, [
-                E('button', {
+                E('h2', { 'style': 'margin:0;' }, _('Clash Configuration')),
+                E('div', {
+                    'style': 'margin-left:auto;display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px;'
+                }, [
+                    E('button', {
                     'class': 'btn',
                     'click': openDashboard,
                     'style': 'margin: 0;'
-                }, _('Open Dashboard')),
-
-                (startStopButton = E('button', {
-                    'class': 'btn',
-                    'click': toggleService,
-                    'style': 'margin: 0;'
-                }, running ? _('Stop Service') : _('Start Service')))
-
+                    }, _('Open Dashboard')),
+                    (restartButton = E('button', {
+                        'class': 'btn',
+                        'click': restartService,
+                        'style': 'margin: 0;'
+                    }, _('Restart Service'))),
+                    (startStopButton = E('button', {
+                        'class': 'btn',
+                        'click': toggleService,
+                        'style': 'margin: 0;'
+                    }, running ? _('Stop Service') : _('Start Service')))
+                ])
             ]),
-            E('h2', _('Clash Configuration')),
             E('p', { 'class': 'cbi-section-descr' }, _('Your current Clash config. When applied, the changes will be saved and the service will be restarted.')),
             validatorNotice,
             E('div', {
