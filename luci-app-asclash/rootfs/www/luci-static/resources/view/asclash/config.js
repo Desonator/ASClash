@@ -232,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.7';
+const ASCLASH_VERSION = '4.8.2.8';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -510,22 +510,22 @@ return view.extend({
             }, [
                 E('h2', { 'style': 'margin:0;' }, _('Clash Configuration')),
                 E('div', {
-                    'style': 'margin-left:auto;display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px;'
+                    'style': 'margin-left:auto;display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;column-gap:8px;row-gap:6px;'
                 }, [
                     E('button', {
-                    'class': 'btn',
-                    'click': openDashboard,
-                    'style': 'margin: 0;'
+                        'class': 'btn',
+                        'click': openDashboard,
+                        'style': 'margin:0 8px 0 0;'
                     }, _('Open Dashboard')),
                     (restartButton = E('button', {
                         'class': 'btn',
                         'click': restartService,
-                        'style': 'margin: 0;'
+                        'style': 'margin:0 8px 0 0;'
                     }, _('Restart Service'))),
                     (startStopButton = E('button', {
                         'class': 'btn',
                         'click': toggleService,
-                        'style': 'margin: 0;'
+                        'style': 'margin:0;'
                     }, running ? _('Stop Service') : _('Start Service')))
                 ])
             ]),

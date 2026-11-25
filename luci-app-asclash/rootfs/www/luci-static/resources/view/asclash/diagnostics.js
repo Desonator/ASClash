@@ -226,7 +226,7 @@ function statusPill(ok, yes, no) {
 
 function card(title, content) {
 	return E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;' }, [
-		E('h3', { 'style': 'margin:0 0 6px;text-align:left;' }, title), content
+		E('h3', { 'style': 'margin:0 0 6px;text-align:left;font-size:16px;line-height:20px;font-weight:600;' }, title), content
 	]);
 }
 
@@ -240,8 +240,8 @@ function listSection(title, state, statusText, metrics, note) {
 	const stateColor = state === 'ok' ? '#198754' : state === 'error' ? '#b42336' : state === 'warning' ? '#b7791f' : '#667085';
 	const children = [
 		E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;' }, [
-			E('h4', { 'style': 'margin:0;text-align:left;' }, title),
-			E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${stateColor};color:#fff;font-size:12px;font-weight:600;` }, statusText)
+		E('h4', { 'style': 'margin:0;text-align:left;font-size:14px;line-height:18px;font-weight:600;' }, title),
+			E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${stateColor};color:#fff;font-size:12px;line-height:14px;font-weight:600;` }, statusText)
 		]),
 		E('div', { 'style': 'margin-top:7px;' }, metrics)
 	];
@@ -370,9 +370,12 @@ return view.extend({
 			? _('Accepted: %d · Skipped: %d · nft sets: %d · CIDR entries: %d').format(accepted, skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0), grouped.sets.size, grouped.total)
 			: _('Accepted: — · Skipped: — · nft sets: %d · CIDR entries: %d').format(grouped.sets.size, grouped.total);
 		const listsCard = E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;' }, [
-			E('div', { 'style': 'display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px;row-gap:4px;margin-bottom:6px;' }, [
-				E('h3', { 'style': 'margin:0;text-align:left;min-width:0;' }, _('Rule-list generation and application')),
-				E('div', { 'style': 'display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap;' }, [statePill(listsState, listsStatus), E('span', { 'class': 'cbi-section-descr' }, compactDate(listDiagnostics.cycle.time || progressTime))])
+			E('div', { 'style': 'display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:10px;row-gap:3px;margin-bottom:5px;' }, [
+				E('h3', { 'style': 'margin:0;text-align:left;min-width:0;font-size:16px;line-height:20px;font-weight:600;' }, _('Rule-list generation and application')),
+				E('div', { 'style': 'display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap;line-height:18px;' }, [
+					statePill(listsState, listsStatus),
+					E('span', { 'class': 'cbi-section-descr', 'style': 'margin:0;font-size:12px;line-height:18px;' }, compactDate(listDiagnostics.cycle.time || progressTime))
+				])
 			]),
 			E('div', { 'style': 'display:grid;gap:8px;' }, [
 				listSection(_('IP-CIDR list without conditions'), fakeSectionState, fakeStatus,
