@@ -411,6 +411,72 @@ msgstr "Отсутствуют или не согласуются компоне
 msgid "If a parser item was skipped, review its reason above. For apply errors, check the first nftables or routing command failure in the raw log; do not clear or replace firewall rules manually until the cause is known."
 msgstr "Если правило пропущено парсером, проверьте указанную выше причину. При ошибках применения найдите в журнале первую ошибку nftables или маршрутизации; не очищайте и не заменяйте правила файрвола вручную, пока причина неизвестна."
 
+msgid "Rule lists"
+msgstr "Списки правил"
+
+msgid "Building…"
+msgstr "Формирование…"
+
+msgid "Build status stale"
+msgstr "Статус формирования устарел"
+
+msgid "Applying…"
+msgstr "Применение…"
+
+msgid "Apply status stale"
+msgstr "Статус применения устарел"
+
+msgid "Updated"
+msgstr "Обновлено"
+
+msgid "Update failed"
+msgstr "Ошибка обновления"
+
+msgid "No update status"
+msgstr "Нет статуса обновления"
+
+msgid "Fake-IP: "
+msgstr "Fake-IP: "
+
+msgid "Grouped AND: "
+msgstr "Grouped AND: "
+
+msgid "providers"
+msgstr "провайдеров"
+
+msgid "Grouped AND"
+msgstr "Grouped AND"
+
+msgid "sets"
+msgstr "наборов"
+
+msgid "CIDRs"
+msgstr "CIDR"
+
+msgid "Set found"
+msgstr "Набор найден"
+
+msgid "Set missing"
+msgstr "Набор отсутствует"
+
+msgid "No entries"
+msgstr "Нет записей"
+
+msgid "Active"
+msgstr "Активно"
+
+msgid "Not confirmed"
+msgstr "Не подтверждено"
+
+msgid "Parser details"
+msgstr "Подробности парсера"
+
+msgid "Grouped parser report unavailable (disabled or not generated)."
+msgstr "Отчёт grouped-парсера недоступен: он отключён или ещё не сформирован."
+
+msgid "Active status checks nftables objects and the grouped digest; it does not compare every IP entry."
+msgstr "Проверяются объекты nftables и digest grouped-правил; каждый IP не сверяется."
+
 msgid "Please wait"
 msgstr "Пожалуйста, подождите"
 

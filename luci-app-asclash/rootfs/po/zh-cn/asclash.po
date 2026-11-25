@@ -407,6 +407,72 @@ msgstr "以下组件缺失或不一致：%s。请检查配置模式与活动 nft
 msgid "If a parser item was skipped, review its reason above. For apply errors, check the first nftables or routing command failure in the raw log; do not clear or replace firewall rules manually until the cause is known."
 msgstr "若规则被解析器跳过，请查看上方原因。若应用失败，请在原始日志中检查首个 nftables 或路由命令错误；查明原因前不要手动清空或替换防火墙规则。"
 
+msgid "Rule lists"
+msgstr "规则列表"
+
+msgid "Building…"
+msgstr "正在生成…"
+
+msgid "Build status stale"
+msgstr "生成状态已过期"
+
+msgid "Applying…"
+msgstr "正在应用…"
+
+msgid "Apply status stale"
+msgstr "应用状态已过期"
+
+msgid "Updated"
+msgstr "已更新"
+
+msgid "Update failed"
+msgstr "更新失败"
+
+msgid "No update status"
+msgstr "没有更新状态"
+
+msgid "Fake-IP: "
+msgstr "Fake-IP："
+
+msgid "Grouped AND: "
+msgstr "Grouped AND："
+
+msgid "providers"
+msgstr "个提供程序"
+
+msgid "Grouped AND"
+msgstr "Grouped AND"
+
+msgid "sets"
+msgstr "个集合"
+
+msgid "CIDRs"
+msgstr "个 CIDR"
+
+msgid "Set found"
+msgstr "集合已找到"
+
+msgid "Set missing"
+msgstr "集合缺失"
+
+msgid "No entries"
+msgstr "无条目"
+
+msgid "Active"
+msgstr "活动"
+
+msgid "Not confirmed"
+msgstr "未确认"
+
+msgid "Parser details"
+msgstr "解析器详情"
+
+msgid "Grouped parser report unavailable (disabled or not generated)."
+msgstr "Grouped 解析器报告不可用（已禁用或尚未生成）。"
+
+msgid "Active status checks nftables objects and the grouped digest; it does not compare every IP entry."
+msgstr "活动状态检查 nftables 对象和分组摘要，不会逐项比较每个 IP。"
+
 msgid "Please wait"
 msgstr "请稍候"
 

@@ -264,34 +264,33 @@ return view.extend({
 		]);
 
 		const progressLabels = {
-			building: progressFresh ? _('Building rule lists') : _('Last list operation: building (stale status)'),
-			applying: progressFresh ? _('Applying firewall rules') : _('Last list operation: applying (stale status)'),
-			applied: _('Last list operation completed'),
-			failed: _('Last list operation failed')
+			building: progressFresh ? _('Building…') : _('Build status stale'),
+			applying: progressFresh ? _('Applying…') : _('Apply status stale'),
+			applied: _('Updated'),
+			failed: _('Update failed')
 		};
 		const progressState = progressPhase === 'failed' ? 'error' : (progressPhase === 'building' || progressPhase === 'applying') && progressFresh ? 'warning' : progressPhase === 'applied' ? 'ok' : 'unknown';
 		const progressDetail = progressPhase === 'unknown'
-			? _('No list operation status is available yet.')
+			? _('No update status')
 			: `${progressLabels[progressPhase] || _('List operation status is unknown')}${progressTime ? ` · ${new Date(progressTime * 1000).toLocaleString()}` : ''}`;
 		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
 		const groupedActive = grouped.total === 0 || (!!groupedSourceDigest && groupedSourceDigest === groupedAppliedDigest && markChain.ok && /@fp_[a-f0-9]+/.test(markChain.output));
-		const listsCard = card(_('Rule-list generation and application'), E('div', {}, [
+		const skippedTotal = skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0);
+		const listDetails = [];
+		if (fakeIpIssues.length)
+			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, [E('strong', {}, _('Fake-IP: ')), fakeIpIssues.join('; ')]));
+		if (parserReportAvailable && skippedSummary.length)
+			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, [E('strong', {}, _('Grouped AND: ')), skippedSummary.join('; ')]));
+		if (!parserReportAvailable)
+			listDetails.push(E('p', { 'style': 'margin:6px 0;' }, _('Grouped parser report unavailable (disabled or not generated).')));
+		listDetails.push(E('p', { 'class': 'cbi-section-descr', 'style': 'margin:6px 0 0;' }, _('Active status checks nftables objects and the grouped digest; it does not compare every IP entry.')));
+		const listsCard = card(_('Rule lists'), E('div', {}, [
 			E('p', { 'style': 'margin:0 0 8px;' }, [statePill(progressState), ' ', progressDetail]),
-			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;' }, [
-				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [_('Fake-IP whitelist'), statusPill(whitelistActive, _('Set is present'), whitelist.total ? _('Generated, but active set is missing') : _('No entries to apply'))]),
-				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [_('Grouped AND rules'), statusPill(groupedActive, _('Current generated data is confirmed active'), grouped.total ? _('Generated data does not match confirmed active data') : _('No entries to apply'))])
+			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;' }, [
+				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;' }, [E('span', {}, [_('Fake-IP whitelist'), ': ', E('strong', {}, String(whitelist.total)), ' · ', String(whitelist.providers.length), ' ', _('providers')]), statusPill(whitelistActive, _('Set found'), whitelist.total ? _('Set missing') : _('No entries'))]),
+				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;' }, [E('span', {}, [_('Grouped AND'), ': ', E('strong', {}, parserReportAvailable ? String(accepted) : '—'), ' / ', parserReportAvailable ? String(skippedTotal) : '—', ' · ', String(grouped.sets.size), ' ', _('sets'), ' · ', String(grouped.total), ' ', _('CIDRs')]), statusPill(groupedActive, _('Active'), grouped.total ? _('Not confirmed') : _('No entries'))])
 			]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, _('Presence checks verify the nftables set/chain and grouped source digest. They do not compare every kernel element with the source files.'))
-		]));
-
-		const fakeCard = card(_('Fake-IP whitelist parser'), E('div', {}, [
-			E('p', { 'style': 'margin:0;' }, [_('Generated entries: '), E('strong', {}, String(whitelist.total)), ' · ', _('Providers: '), E('strong', {}, String(whitelist.providers.length))]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, [E('strong', {}, _('Parser notes: ')), fakeIpIssues.length ? fakeIpIssues.join('; ') : _('No recent Fake-IP parser errors in the log buffer.')])
-		]));
-
-		const groupedCard = card(_('Grouped AND rules'), E('div', {}, [
-			E('p', { 'style': 'margin:0;' }, [_('Accepted by parser: '), E('strong', {}, parserReportAvailable ? String(accepted) : '—'), ' · ', _('Skipped by parser: '), E('strong', {}, parserReportAvailable ? String(skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0)) : '—'), ' · ', _('Unique nft sets: '), E('strong', {}, String(grouped.sets.size)), ' · ', _('CIDR entries: '), E('strong', {}, String(grouped.total))]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, [E('strong', {}, _('Parser notes: ')), parserReportAvailable ? (skippedSummary.length ? skippedSummary.join('; ') : _('No AND rules were skipped by the parser.')) : _('Parser diagnostics are not available because grouped rules are disabled or have not been generated yet.')])
+			E('details', { 'style': 'margin-top:8px;' }, [E('summary', { 'style': 'cursor:pointer;' }, _('Parser details')), ...listDetails])
 		]));
 
 		const modeLabel = proxyMode === 'mixed' ? 'MIXED' : proxyMode === 'tun' ? 'TUN' : proxyMode === 'tproxy' ? 'TPROXY' : _('Unknown');
@@ -335,8 +334,6 @@ return view.extend({
 			card(_('Overall status'), summary),
 			modeCard,
 			listsCard,
-			fakeCard,
-			groupedCard,
 			warningCard
 		]);
 	},
