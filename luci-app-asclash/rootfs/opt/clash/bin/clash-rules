@@ -2627,12 +2627,20 @@ apply_nft_src_ip_cidr_policy() {
 }
 
 apply_nft_dhcp_bypass() {
+    local fake_ip_range="$1"
     local dhcp_bypass_ips
     dhcp_bypass_ips=$(get_dhcp_bypass_ips)
     [ -n "$dhcp_bypass_ips" ] || return 0
 
+    local udp_mark="$MARK_TPROXY"
+    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
     echo "$dhcp_bypass_ips" | while IFS= read -r ip; do
-        [ -n "$ip" ] && nft add rule inet clash CLASH_MARK ip saddr "$ip" counter return
+        [ -n "$ip" ] || continue
+        if [ -n "$fake_ip_range" ]; then
+            nft add rule inet clash CLASH_MARK ip saddr "$ip" ip daddr "$fake_ip_range" meta l4proto tcp counter meta mark set "$MARK_TPROXY"
+            nft add rule inet clash CLASH_MARK ip saddr "$ip" ip daddr "$fake_ip_range" meta l4proto udp counter meta mark set "$udp_mark"
+        fi
+        nft add rule inet clash CLASH_MARK ip saddr "$ip" counter return
     done
     msg "Permanent DHCP clients excluded from proxy: $(echo "$dhcp_bypass_ips" | tr '\n' ' ')"
 }
@@ -2982,7 +2990,7 @@ apply_iptables_tproxy_rules() {
     local fake_ip_range="$1"
     local server_ips="$2"
 
-    apply_iptables_dhcp_bypass
+    apply_iptables_dhcp_bypass "$fake_ip_range"
     apply_iptables_src_ip_cidr_policy
     apply_iptables_src_ip_cidr_rules "$server_ips"
 
@@ -3068,12 +3076,32 @@ apply_iptables_src_ip_cidr_policy() {
 }
 
 apply_iptables_dhcp_bypass() {
+    local fake_ip_range="$1"
     local dhcp_bypass_ips
     dhcp_bypass_ips=$(get_dhcp_bypass_ips)
     [ -n "$dhcp_bypass_ips" ] || return 0
 
+    local udp_mark="$MARK_TPROXY"
+    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
     echo "$dhcp_bypass_ips" | while IFS= read -r ip; do
-        [ -n "$ip" ] && iptables -t mangle -A CLASH_PROCESS -s "$ip" -j RETURN
+        [ -n "$ip" ] || continue
+        if [ -n "$fake_ip_range" ]; then
+            case "$PROXY_MODE" in
+                tun)
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j MARK --set-mark "$MARK_TPROXY"
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j MARK --set-mark "$MARK_TPROXY"
+                    ;;
+                mixed)
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j MARK --set-mark "$udp_mark"
+                    ;;
+                *)
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
+                    iptables -t mangle -A CLASH_PROCESS -s "$ip" -d "$fake_ip_range" -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
+                    ;;
+            esac
+        fi
+        iptables -t mangle -A CLASH_PROCESS -s "$ip" -j RETURN
     done
     msg "Permanent DHCP clients excluded from proxy: $(echo "$dhcp_bypass_ips" | tr '\n' ' ')"
 }
@@ -3337,7 +3365,7 @@ apply_nft_rules() {
 
     # Keep selected permanent DHCP clients out of every later marking rule,
     # including the grouped provider/port rules appended to CLASH_MARK.
-    apply_nft_dhcp_bypass
+    apply_nft_dhcp_bypass "$fake_ip_range"
 
     # Apply grouped provider/port rules after service, reserved-network and
     # proxy-server exclusions so those returns always take precedence.

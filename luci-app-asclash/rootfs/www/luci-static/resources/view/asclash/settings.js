@@ -1698,7 +1698,7 @@ async function loadStaticDhcpHosts() {
         }).filter(Boolean);
     } catch (e) {
         console.error(_('Failed to load permanent DHCP leases:'), e);
-        return [];
+        return null;
     }
 }
 
@@ -1706,17 +1706,20 @@ function createDhcpBypassSection(hosts, selectedMacs) {
     const container = E('div', { 'class': 'cbi-section' });
     container.appendChild(E('h3', _('Exceptions for permanent DHCP leases')));
     container.appendChild(E('p', { 'class': 'cbi-section-descr' },
-        _('Selected devices will bypass the proxy and use direct routing. Only static host reservations with a MAC address and IPv4 address are listed.')));
+        _('Selected devices will bypass the proxy for real-IP traffic. Fake-IP traffic still goes through the core for address mapping and follows the core routing rules. Only permanent DHCP reservations with a MAC address and IPv4 address are listed.')));
 
     const list = E('div', {
         'id': 'dhcp-bypass-hosts',
         'style': 'display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px;'
     });
-    if (!hosts.length) {
+    if (!Array.isArray(hosts)) {
+        list.appendChild(E('div', { 'style': 'color: ' + PANEL_STATUS_TEXT_WARN + ';' },
+            _('Could not read permanent DHCP reservations. Previously selected exceptions will be preserved.')));
+    } else if (!hosts.length) {
         list.appendChild(E('div', { 'style': 'color: ' + PANEL_MUTED_TEXT + ';' },
             _('No permanent DHCP reservations with MAC and IPv4 address were found.')));
     }
-    hosts.forEach(host => {
+    (hosts || []).forEach(host => {
         const id = 'dhcp_bypass_' + host.mac.replace(/[^a-f0-9]/g, '');
         const checkbox = E('input', { type: 'checkbox', id, value: host.mac });
         checkbox.checked = selectedMacs.includes(host.mac);
@@ -1982,8 +1985,10 @@ return view.extend({
                 const enableHwid = additionalSettings.querySelector('#enable_hwid')?.checked || false;
                 const hwidUserAgent = additionalSettings.querySelector('#hwid_user_agent')?.value || 'ASClash';
                 const hwidDeviceOS = additionalSettings.querySelector('#hwid_device_os')?.value || 'OpenWrt';
-                const dhcpBypassMacs = Array.from(dhcpBypassSection.querySelectorAll('#dhcp-bypass-hosts input[type="checkbox"]:checked'))
-                    .map(cb => cb.value);
+                const dhcpBypassMacs = Array.isArray(staticDhcpHosts)
+                    ? Array.from(dhcpBypassSection.querySelectorAll('#dhcp-bypass-hosts input[type="checkbox"]:checked'))
+                        .map(cb => cb.value)
+                    : (settings.dhcpBypassMacs || []);
 
                 const selected = [];
                 const checkboxes = interfaceSelector.querySelectorAll('input[type="checkbox"]:checked');

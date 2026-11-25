@@ -985,11 +985,14 @@ msgstr "Дополнительные настройки"
 msgid "Exceptions for permanent DHCP leases"
 msgstr "Исключения для устройств из постоянных DHCP-аренд"
 
-msgid "Selected devices will bypass the proxy and use direct routing. Only static host reservations with a MAC address and IPv4 address are listed."
-msgstr "Выбранные устройства будут обходить прокси и выходить в интернет напрямую. В списке только постоянные записи устройств с MAC- и IPv4-адресом."
+msgid "Selected devices will bypass the proxy for real-IP traffic. Fake-IP traffic still goes through the core for address mapping and follows the core routing rules. Only permanent DHCP reservations with a MAC address and IPv4 address are listed."
+msgstr "Выбранные устройства будут обходить прокси для трафика с реальными IP-адресами. Трафик к Fake-IP по-прежнему проходит через ядро для сопоставления адреса и обрабатывается по его правилам. В списке только постоянные DHCP-аренды с MAC- и IPv4-адресом."
 
 msgid "No permanent DHCP reservations with MAC and IPv4 address were found."
 msgstr "Постоянные DHCP-аренды с MAC- и IPv4-адресом не найдены."
+
+msgid "Could not read permanent DHCP reservations. Previously selected exceptions will be preserved."
+msgstr "Не удалось прочитать постоянные DHCP-аренды. Ранее выбранные исключения будут сохранены."
 
 msgid "Failed to load permanent DHCP leases:"
 msgstr "Не удалось загрузить постоянные DHCP-аренды:"
