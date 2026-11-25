@@ -225,8 +225,8 @@ function statusPill(ok, yes, no) {
 }
 
 function card(title, content) {
-	return E('section', { 'class': 'cbi-section', 'style': 'margin:12px 0;padding:14px;border:1px solid rgba(127,127,127,.35);border-radius:6px;' }, [
-		E('h3', { 'style': 'margin:0 0 10px;' }, title), content
+	return E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;' }, [
+		E('h3', { 'style': 'margin:0 0 6px;text-align:left;' }, title), content
 	]);
 }
 
@@ -240,14 +240,14 @@ function listSection(title, state, statusText, metrics, note) {
 	const stateColor = state === 'ok' ? '#198754' : state === 'error' ? '#b42336' : state === 'warning' ? '#b7791f' : '#667085';
 	const children = [
 		E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;' }, [
-			E('h4', { 'style': 'margin:0;' }, title),
+			E('h4', { 'style': 'margin:0;text-align:left;' }, title),
 			E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${stateColor};color:#fff;font-size:12px;font-weight:600;` }, statusText)
 		]),
 		E('div', { 'style': 'margin-top:7px;' }, metrics)
 	];
 	if (note)
 		children.push(E('div', { 'style': 'margin:6px 0 0;' }, note));
-	return E('div', { 'style': 'padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:5px;' }, children);
+	return E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:5px;text-align:left;' }, children);
 }
 
 return view.extend({
@@ -369,10 +369,10 @@ return view.extend({
 		const groupedMetrics = parserReportAvailable
 			? _('Accepted: %d · Skipped: %d · nft sets: %d · CIDR entries: %d').format(accepted, skipped.reduce((sum, row) => sum + (Number(row[2]) || 0), 0), grouped.sets.size, grouped.total)
 			: _('Accepted: — · Skipped: — · nft sets: %d · CIDR entries: %d').format(grouped.sets.size, grouped.total);
-		const listsCard = E('section', { 'class': 'cbi-section', 'style': 'margin:12px 0;padding:14px;border:1px solid rgba(127,127,127,.35);border-radius:6px;' }, [
-			E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;' }, [
-				E('h3', { 'style': 'margin:0;' }, _('Rule-list generation and application')),
-				E('div', { 'style': 'display:flex;align-items:center;gap:10px;' }, [statePill(listsState, listsStatus), E('span', { 'class': 'cbi-section-descr' }, compactDate(listDiagnostics.cycle.time || progressTime))])
+		const listsCard = E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;' }, [
+			E('div', { 'style': 'display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px;row-gap:4px;margin-bottom:6px;' }, [
+				E('h3', { 'style': 'margin:0;text-align:left;min-width:0;' }, _('Rule-list generation and application')),
+				E('div', { 'style': 'display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap;' }, [statePill(listsState, listsStatus), E('span', { 'class': 'cbi-section-descr' }, compactDate(listDiagnostics.cycle.time || progressTime))])
 			]),
 			E('div', { 'style': 'display:grid;gap:8px;' }, [
 				listSection(_('IP-CIDR list without conditions'), fakeSectionState, fakeStatus,
@@ -396,12 +396,13 @@ return view.extend({
 			!routingOk ? E('p', { 'class': 'alert-message warning', 'style': 'margin:10px 0 0;' }, [_('Missing or inconsistent components: %s. Compare the configured mode with the active nftables chains, ip rules, routes and TUN interface; after changing network-mode settings, restart the Clash service.').format(missingModeChecks.join(', '))]) : null,
 			E('details', { 'style': 'margin-top:10px;' }, [
 				E('summary', { 'style': 'cursor:pointer;' }, _('Raw network details')),
-				E('h4', {}, _('nftables chains')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, nft.output || nft.error || _('No output')),
-				E('h4', {}, _('ip rule')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, rules.output || rules.error || _('No output')),
-				E('h4', {}, _('Routing table 100')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route100.output || route100.error || _('Empty')),
-				E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty')),
-				E('h4', {}, _('TUN interface')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, tunLink.output || tunLink.error || _('Not present'))
-			])
+				E('h4', {}, _('nftables chains')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, nft.output || nft.error || _('No output')),
+				E('h4', {}, _('ip rule')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, rules.output || rules.error || _('No output')),
+				E('h4', {}, _('Routing table 100')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, route100.output || route100.error || _('Empty')),
+				E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty')),
+				E('h4', {}, _('TUN interface')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, tunLink.output || tunLink.error || _('Not present')),
+				(proxyMode === 'tun' || proxyMode === 'mixed' ? E('p', { 'class': 'cbi-section-descr' }, _('On a virtual TUN interface, state UNKNOWN alone is not an error. Check the UP flag and active route as well.')) : null)
+			].filter(Boolean))
 		].filter(Boolean)));
 
 		const warningContent = warnings.length

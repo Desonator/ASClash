@@ -507,6 +507,9 @@ msgstr "Исторические сообщения журнала (не вли�
 msgid "Mihomo is not running; provider check has not started"
 msgstr "Mihomo не запущен; проверка provider-ов ещё не началась"
 
+msgid "On a virtual TUN interface, state UNKNOWN alone is not an error. Check the UP flag and active route as well."
+msgstr "Для виртуального TUN-интерфейса state UNKNOWN сам по себе не является ошибкой. Дополнительно проверьте флаг UP и активный маршрут."
+
 msgid "Please wait"
 msgstr "Пожалуйста, подождите"
 
