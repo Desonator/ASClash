@@ -479,6 +479,33 @@ msgstr "Служба успешно перезагружена."
 msgid "Service is restarting…"
 msgstr "Служба перезапускается…"
 
+msgid "Clash is starting; firewall lists will be rebuilt and applied."
+msgstr "Запускается Clash; списки файрвола будут пересобраны и применены."
+
+msgid "Clash is restarting; firewall lists will be rebuilt and applied."
+msgstr "Clash перезапускается; списки файрвола будут пересобраны и применены."
+
+msgid "Building applicable Fake-IP and grouped firewall lists…"
+msgstr "Формируются подходящие списки Fake-IP и сгруппированных правил файрвола…"
+
+msgid "Lists are built; applying them to the firewall…"
+msgstr "Списки сформированы; применяются правила файрвола…"
+
+msgid "Generated lists and firewall rules were applied successfully."
+msgstr "Списки сформированы, правила файрвола успешно применены."
+
+msgid "List generation or firewall application failed. Check Diagnostics and the system log."
+msgstr "Не удалось сформировать списки или применить правила файрвола. Проверьте диагностику и системный журнал."
+
+msgid "The service started, but list application could not be confirmed yet. Check Diagnostics and the system log."
+msgstr "Служба запущена, но подтвердить применение списков пока не удалось. Проверьте диагностику и системный журнал."
+
+msgid "The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log."
+msgstr "Служба перезапущена, но подтвердить применение списков пока не удалось. Проверьте диагностику и системный журнал."
+
+msgid "Config reloaded; checking and updating generated firewall lists…"
+msgstr "Конфигурация загружена; проверяются и обновляются сформированные списки файрвола…"
+
 msgid "Service is still restarting — it may take longer on a slow connection. Reload the page in a moment to check its status."
 msgstr "Служба всё ещё перезапускается — на медленном соединении это может занять больше времени. Обновите страницу через несколько секунд, чтобы проверить её состояние."
 

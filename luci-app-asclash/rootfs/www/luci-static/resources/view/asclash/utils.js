@@ -1,6 +1,7 @@
 'use strict';
 'require fs';
 'require rpc';
+'require ui';
 
 const RPC_TIMEOUT_SEC = 60;
 const SERVICE_POLL_TIMEOUT_MS = 60000;
@@ -8,6 +9,7 @@ const SERVICE_POLL_INTERVAL_MS = 500;
 const WRITE_CHUNK_SIZE = 8000;
 const WRITE_INLINE_MAX = 32768;
 const MAX_CLASH_TEST_ERROR_LEN = 8000;
+const LIST_PROGRESS_PATH = '/tmp/clash/asclash-list-progress';
 
 function unescapeLogString(s) {
     return String(s)
@@ -210,6 +212,80 @@ async function waitForServiceStatus(getStatusFn, targetStatus, timeoutMs) {
     return false;
 }
 
+async function getListProgress() {
+    try {
+        return String(await L.resolveDefault(fs.read(LIST_PROGRESS_PATH), '')).trim();
+    } catch (_e) {
+        return '';
+    }
+}
+
+async function waitForListProgress(previous, timeoutMs) {
+    const baseline = String(previous || '').trim();
+    const deadline = Date.now() + (timeoutMs || 75000);
+    while (Date.now() < deadline) {
+        const current = await getListProgress();
+        if (current && current !== baseline) {
+            const fields = current.split('|');
+            const phase = fields[1] || '';
+            if (phase === 'applied' || phase === 'failed')
+                return { operation: fields[0] || '', phase };
+        }
+        await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    return null;
+}
+
+async function watchListProgress(previous, onProgress, timeoutMs) {
+    const deadline = Date.now() + (timeoutMs || 120000);
+    const baseline = String(previous || '').trim();
+    let last = baseline;
+    let lastOperation = '';
+    let lastPhase = '';
+    let quietUntil = 0;
+
+    while (Date.now() < deadline) {
+        const current = await getListProgress();
+        if (current && current !== last && current !== baseline) {
+            const fields = current.split('|');
+            const operation = fields[0] || '';
+            const phase = fields[1] || '';
+            if (operation !== lastOperation || phase !== lastPhase) {
+                lastOperation = operation;
+                lastPhase = phase;
+                if (typeof onProgress === 'function') onProgress({ operation, phase });
+            }
+            quietUntil = phase === 'applied' || phase === 'failed' ? Date.now() + 70000 : 0;
+            last = current;
+        }
+
+        // A service-started callback may refresh provider-derived lists several
+        // seconds after the core is running. Keep watching briefly after a
+        // completed phase so LuCI can report that follow-up operation too.
+        if (quietUntil && Date.now() >= quietUntil) break;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    return last;
+}
+
+function notifyListProgress(progress) {
+    if (!progress) return;
+    const message = {
+        building: _('Building applicable Fake-IP and grouped firewall lists…'),
+        applying: _('Lists are built; applying them to the firewall…'),
+        applied: _('Generated lists and firewall rules were applied successfully.'),
+        failed: _('List generation or firewall application failed. Check Diagnostics and the system log.')
+    }[progress.phase];
+    if (message)
+        ui.addNotification(null, E('p', message), progress.phase === 'failed' ? 'error' : progress.phase === 'applied' ? 'success' : 'info');
+}
+
+function monitorListProgress(previous) {
+    return watchListProgress(previous, notifyListProgress, 120000)
+        .catch(e => console.warn('Failed to monitor list progress:', e));
+}
+
 return L.Class.extend({
     bumpRpcTimeout: bumpRpcTimeout,
     execDetached: execDetached,
@@ -218,6 +294,10 @@ return L.Class.extend({
     formatClashLogMessage: formatClashLogMessage,
     getClashRunning: getClashRunning,
     waitForServiceStatus: waitForServiceStatus,
+    getListProgress: getListProgress,
+    waitForListProgress: waitForListProgress,
+    watchListProgress: watchListProgress,
+    monitorListProgress: monitorListProgress,
     SERVICE_POLL_TIMEOUT_MS: SERVICE_POLL_TIMEOUT_MS,
 
     isLightTheme: function() {

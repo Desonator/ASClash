@@ -30,19 +30,33 @@ function notifyRestartPending() {
     ), 'warning');
 }
 
+function watchListProgress(previous) {
+	view_asclash_utils.monitorListProgress(previous);
+}
+
 async function toggleService() {
     if (startStopButton) startStopButton.disabled = true;
     try {
         const running = await getServiceStatus();
         const target = !running;
+        const progressBefore = target ? await view_asclash_utils.getListProgress() : '';
         if (running) {
             await dispatchServiceActions(['stop', 'disable']);
         } else {
             await dispatchServiceActions(['start', 'enable']);
+            ui.addNotification(null, E('p', _('Clash is starting; firewall lists will be rebuilt and applied.')), 'info');
+            watchListProgress(progressBefore);
         }
 
         if (await view_asclash_utils.waitForServiceStatus(getServiceStatus, target)) {
-            window.location.reload();
+            if (target) {
+                const progress = await view_asclash_utils.waitForListProgress(progressBefore, 90000);
+                if (!progress)
+                    ui.addNotification(null, E('p', _('The service started, but list application could not be confirmed yet. Check Diagnostics and the system log.')), 'warning');
+                if (startStopButton) startStopButton.textContent = _('Stop Service');
+            } else {
+                window.location.reload();
+            }
         } else {
             notifyRestartPending();
         }
@@ -285,17 +299,26 @@ return view.extend({
                 const value = await writeAndTestConfig();
                 if (value === null) return;
 
+                const progressBefore = await view_asclash_utils.getListProgress();
+
                 try {
                     await view_asclash_utils.execDetached('/etc/init.d/clash reload');
                 } catch (e) {}
 
-                ui.addNotification(null, E('p', _('Service is restarting…')), 'info');
+                ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+                watchListProgress(progressBefore);
 
-                if (await view_asclash_utils.waitForServiceStatus(getServiceStatus, true)) {
+                const [serviceRunning, progress] = await Promise.all([
+                    view_asclash_utils.waitForServiceStatus(getServiceStatus, true),
+                    view_asclash_utils.waitForListProgress(progressBefore, 90000)
+                ]);
+                if (serviceRunning && progress && progress.phase === 'applied') {
                     ui.addNotification(null, E('p', _('Service reloaded successfully.')), 'info');
-                    window.location.reload();
-                } else {
+                    if (startStopButton) startStopButton.textContent = _('Stop Service');
+                } else if (!serviceRunning) {
                     notifyRestartPending();
+                } else {
+                    ui.addNotification(null, E('p', _('The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log.')), 'warning');
                 }
             } catch(e) {
                 ui.addNotification(null, E('p', _('Unable to save contents: %s').format(e.message)), 'error');
@@ -358,11 +381,16 @@ return view.extend({
                     return;
                 }
 
-                fs.exec('/opt/clash/bin/clash-rules', ['update']).catch(function(err) {
+                const progressBefore = await view_asclash_utils.getListProgress();
+                try {
+                    await view_asclash_utils.execDetached('/opt/clash/bin/clash-rules update');
+                    ui.addNotification(null, E('p', _('Config reloaded; checking and updating generated firewall lists…')), 'info');
+                    watchListProgress(progressBefore);
+                } catch (err) {
                     ui.addNotification(null, E('p',
                         _('Config reloaded, but updating subscription IP cache failed: %s').format((err && err.message) || String(err))
                     ), 'warning');
-                });
+                }
 
                 ui.addNotification(null, E('p',
                     _('Config reloaded via Mihomo API — active connections preserved.')

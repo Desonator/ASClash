@@ -422,6 +422,33 @@ msgstr "服务已成功重载。"
 msgid "Service is restarting…"
 msgstr "服务正在重启…"
 
+msgid "Clash is starting; firewall lists will be rebuilt and applied."
+msgstr "Clash 正在启动；将重新生成并应用防火墙列表。"
+
+msgid "Clash is restarting; firewall lists will be rebuilt and applied."
+msgstr "Clash 正在重启；将重新生成并应用防火墙列表。"
+
+msgid "Building applicable Fake-IP and grouped firewall lists…"
+msgstr "正在生成适用的 Fake-IP 和分组防火墙列表…"
+
+msgid "Lists are built; applying them to the firewall…"
+msgstr "列表已生成，正在应用防火墙规则…"
+
+msgid "Generated lists and firewall rules were applied successfully."
+msgstr "列表已生成，防火墙规则已成功应用。"
+
+msgid "List generation or firewall application failed. Check Diagnostics and the system log."
+msgstr "列表生成或防火墙规则应用失败。请检查诊断页面和系统日志。"
+
+msgid "The service started, but list application could not be confirmed yet. Check Diagnostics and the system log."
+msgstr "服务已启动，但尚无法确认列表是否已应用。请检查诊断页面和系统日志。"
+
+msgid "The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log."
+msgstr "服务已重启，但尚无法确认列表是否已应用。请检查诊断页面和系统日志。"
+
+msgid "Config reloaded; checking and updating generated firewall lists…"
+msgstr "配置已重新加载；正在检查并更新已生成的防火墙列表…"
+
 msgid "Service is still restarting — it may take longer on a slow connection. Reload the page in a moment to check its status."
 msgstr "服务仍在重启中——在慢速连接下可能需要更长时间。请稍后刷新页面以查看其状态。"
 

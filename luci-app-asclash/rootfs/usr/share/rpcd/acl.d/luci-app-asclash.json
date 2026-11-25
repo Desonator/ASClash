@@ -15,6 +15,7 @@
                 "/tmp/clash/fakeip_port_groups.nft.digest": [ "read" ],
                 "/tmp/clash/fakeip_port_groups.stats": [ "read" ],
                 "/tmp/clash/fakeip_port_parser_diagnostics.txt": [ "read" ],
+                "/tmp/clash/asclash-list-progress": [ "read" ],
                 "/proc/net/dev": [ "read" ],
                 "/proc/net/route": [ "read" ],
                 "/sys/class/net": [ "list" ],

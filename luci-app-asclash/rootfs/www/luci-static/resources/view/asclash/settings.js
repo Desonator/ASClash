@@ -7,6 +7,10 @@
 
 view_asclash_utils.bumpRpcTimeout();
 
+function watchListProgress(previous) {
+	view_asclash_utils.monitorListProgress(previous);
+}
+
 // =============================================================================
 // SECTION: Network interface helpers
 // =============================================================================
@@ -1969,20 +1973,30 @@ return view.extend({
             'click': async function() {
                 restartButton.disabled = true;
                 try {
+                    const progressBefore = await view_asclash_utils.getListProgress();
                     try {
                         await view_asclash_utils.execDetached('/etc/init.d/clash restart');
                     } catch (e) {}
 
-                    ui.addNotification(null, E('p', _('Service is restarting…')), 'info');
+                    ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+                    watchListProgress(progressBefore);
 
-                    if (!(await view_asclash_utils.waitForServiceStatus(
-                        view_asclash_utils.getClashRunning, true
-                    ))) {
+                    const [serviceRunning, progress] = await Promise.all([
+                        view_asclash_utils.waitForServiceStatus(view_asclash_utils.getClashRunning, true),
+                        view_asclash_utils.waitForListProgress(progressBefore, 90000)
+                    ]);
+                    if (!serviceRunning) {
                         ui.addNotification(null, E('p',
                             _('Service is still restarting — it may take longer on a slow connection. Reload the page in a moment to check its status.')
                         ), 'warning');
                         return;
                     }
+
+                    if (!progress) {
+                        ui.addNotification(null, E('p', _('The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log.')), 'warning');
+                        return;
+                    }
+                    if (progress.phase === 'failed') return;
 
                     ui.addNotification(null, E('p', _('Clash service restarted successfully.')), 'info');
                     const currentMode = modeSelector.querySelector('input[name="interface_mode"]:checked').value;

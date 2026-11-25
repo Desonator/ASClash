@@ -58,6 +58,8 @@ readonly GROUPED_FAKEIP_STATS_FILE="/tmp/clash/fakeip_port_groups.stats"
 readonly GROUPED_FAKEIP_BATCH_DIGEST_FILE="/tmp/clash/fakeip_port_groups.nft.digest"
 readonly GROUPED_FAKEIP_BATCH_CHECKSUM_FILE="/tmp/clash/fakeip_port_groups.nft.md5"
 readonly CLASH_RULES_UPDATE_LOCK="/tmp/clash/clash-rules-update.lock"
+readonly ASCLASH_LIST_PROGRESS_FILE="/tmp/clash/asclash-list-progress"
+ASCLASH_PROGRESS_ID=""
 # Markers delimit the auto-generated block inside the fakeip whitelist file.
 # Everything outside the markers is preserved on each refresh.
 readonly FAKEIP_AUTO_BEGIN="# AUTO-BEGIN: generated from rule-providers — do not edit between markers"
@@ -147,6 +149,17 @@ BRIDGE_NF_CALL6_FLAG="/tmp/clash/bridge_nf_call_ip6tables_flag"
 msg() {
     [ "$CLASH_RULES_QUIET" = "1" ] && return 0
     logger -p daemon.info -st "clash-rules[$$]" "$*"
+}
+
+# Expose the current rule-list lifecycle to LuCI. The file contains only an
+# operation id and a phase token; it is stored on tmpfs and atomically replaced.
+set_list_progress() {
+    local phase="$1"
+    [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="rules-$$"
+    mkdir -p "$(dirname "$ASCLASH_LIST_PROGRESS_FILE")" 2>/dev/null || return 1
+    local tmp_file="${ASCLASH_LIST_PROGRESS_FILE}.$$"
+    printf '%s|%s\n' "$ASCLASH_PROGRESS_ID" "$phase" > "$tmp_file" || return 1
+    mv -f "$tmp_file" "$ASCLASH_LIST_PROGRESS_FILE"
 }
 
 # Function to log warnings
@@ -3693,6 +3706,8 @@ refresh_fakeip_whitelist_file() {
 
 update_fakeip_whitelist_sets() {
     msg "Updating fakeip whitelist IP-CIDR sets..."
+    [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="whitelist-$$"
+    set_list_progress "building"
     load_all_settings_once
 
     local fake_ip_config fake_ip_range fake_ip_filter_mode
@@ -3704,6 +3719,7 @@ update_fakeip_whitelist_sets() {
 
     if [ "$fake_ip_filter_mode" != "whitelist" ] && [ "$fake_ip_filter_mode" != "rule" ]; then
         msg "fake-ip-filter-mode is '${fake_ip_filter_mode:-blacklist}', not 'whitelist'/'rule' — clearing fakeip sets if they exist"
+        set_list_progress "applying"
         rm -f "$FAKEIP_WHITELIST_DIGEST_FILE" 2>/dev/null
         if hash nft 2>/dev/null && nft list set inet clash fakeip_whitelist >/dev/null 2>&1; then
             nft flush set inet clash fakeip_whitelist 2>/dev/null
@@ -3727,6 +3743,7 @@ update_fakeip_whitelist_sets() {
     # accidental stdout from nested provider converters out of SSH output.
     generate_grouped_port_sources >/dev/null || {
         warn "Grouped IP-CIDR rule generation failed; refusing to update the active whitelist set"
+        set_list_progress "failed"
         return 1
     }
 
@@ -3749,6 +3766,7 @@ update_fakeip_whitelist_sets() {
         return 0
     fi
 
+    set_list_progress "applying"
     if hash nft 2>/dev/null; then
         if nft list set inet clash fakeip_whitelist >/dev/null 2>&1; then
             local nft_batch="/tmp/clash/fakeip_whitelist_nft.$$"
@@ -3780,11 +3798,13 @@ update_fakeip_whitelist_sets() {
             else
                 rm -f "$nft_batch"
                 msg "ERROR: Failed to update nft fakeip_whitelist set; keeping previous set contents"
+                set_list_progress "failed"
                 return 1
             fi
             printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"
         else
             msg "WARNING: nft set inet clash fakeip_whitelist not found — is the clash-rules firewall active?"
+            set_list_progress "failed"
             return 1
         fi
     elif hash iptables 2>/dev/null; then
@@ -3793,10 +3813,12 @@ update_fakeip_whitelist_sets() {
                 printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"
         else
             msg "ERROR: ipset not available for iptables fakeip whitelist update"
+            set_list_progress "failed"
             return 1
         fi
     else
         msg "ERROR: Neither nftables nor iptables found"
+        set_list_progress "failed"
         return 1
     fi
 
@@ -3952,10 +3974,13 @@ restore_bridge_nf_call() {
 
 start() {
     msg "Starting Clash rules script"
+    [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="start-$$"
+    set_list_progress "building"
 
     # Check if config file exists before proceeding
     if [ ! -f "$CONFIG_FILE" ]; then
         msg "ERROR: Clash config file not found: $CONFIG_FILE"
+        set_list_progress "failed"
         return 1
     fi
 
@@ -3984,6 +4009,7 @@ start() {
         FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
         generate_grouped_port_sources >/dev/null || {
             warn "Grouped IP-CIDR rule generation failed; refusing to start with an incomplete firewall policy"
+            set_list_progress "failed"
             return 1
         }
         if [ -n "$FAKEIP_WHITELIST_IPS" ]; then
@@ -4027,6 +4053,7 @@ start() {
         msg "No fake-ip configuration detected - proxy will be applied to all traffic"
     fi
 
+    set_list_progress "applying"
     if hash nft 2>/dev/null; then
         msg "Using nftables for traffic redirection"
         if apply_nft_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
@@ -4034,10 +4061,12 @@ start() {
                 warn "Policy-routing setup failed; rolling back nftables rules"
                 teardown_routing_rules
                 rollback_nft_rules ""
+                set_list_progress "failed"
                 return 1
             }
         else
             msg "ERROR: Failed to apply nftables rules"
+            set_list_progress "failed"
             return 1
         fi
     elif hash iptables 2>/dev/null; then
@@ -4047,18 +4076,22 @@ start() {
                 warn "Policy-routing setup failed; rolling back iptables rules"
                 teardown_routing_rules
                 rollback_iptables_rules ""
+                set_list_progress "failed"
                 return 1
             }
         else
             msg "ERROR: Failed to apply iptables rules"
+            set_list_progress "failed"
             return 1
         fi
     else
         msg "ERROR: Neither nftables nor iptables found"
+        set_list_progress "failed"
         return 1
     fi
 
     disable_bridge_nf_call
+    set_list_progress "applied"
 
     msg "Clash rules script started successfully (proxy mode: $PROXY_MODE, interface mode: $MODE)"
 
@@ -4145,10 +4178,15 @@ case "$1" in
         ;;
     update)
         acquire_update_lock || exit 0
+        ASCLASH_PROGRESS_ID="update-$$"
+        set_list_progress "building"
         old_grouped_digest=""
         [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && old_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
         update_rules
         update_rc=$?
+        if [ "$update_rc" -ne 0 ]; then
+            set_list_progress "failed"
+        fi
         if [ "$update_rc" -eq 0 ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
             new_grouped_digest=""
             [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
@@ -4167,13 +4205,21 @@ case "$1" in
                 msg "Grouped fakeip sources unchanged, keeping active nftables rules"
             fi
         fi
+        [ "$update_rc" -ne 0 ] || set_list_progress "applied"
         release_update_lock
         exit "$update_rc"
         ;;
     update-ip-whitelist)
         acquire_update_lock || exit 0
+        ASCLASH_PROGRESS_ID="whitelist-$$"
+        set_list_progress "building"
         update_fakeip_whitelist_sets
         update_rc=$?
+        if [ "$update_rc" -eq 0 ]; then
+            set_list_progress "applied"
+        else
+            set_list_progress "failed"
+        fi
         release_update_lock
         exit "$update_rc"
         ;;

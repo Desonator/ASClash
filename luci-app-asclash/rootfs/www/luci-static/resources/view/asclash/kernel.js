@@ -334,9 +334,14 @@ function createKernelManagementSection() {
 	restartButton.addEventListener('click', async function() {
 		this.disabled = true;
 		try {
+			const progressBefore = await view_asclash_utils.getListProgress();
 			await view_asclash_utils.execDetached('/etc/init.d/clash restart');
-			ui.addNotification(null, E('p', localized('Service is restarting…', 'Служба перезапускается…')), 'info');
-			const restarted = await view_asclash_utils.waitForServiceStatus(view_asclash_utils.getClashRunning, true);
+			ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+			view_asclash_utils.monitorListProgress(progressBefore);
+			const [restarted, progress] = await Promise.all([
+				view_asclash_utils.waitForServiceStatus(view_asclash_utils.getClashRunning, true),
+				view_asclash_utils.waitForListProgress(progressBefore, 90000)
+			]);
 			if (!restarted) {
 				ui.addNotification(null, E('p', localized(
 					'Service is still restarting — it may take longer on a slow connection. Reload the page in a moment to check its status.',
@@ -344,6 +349,11 @@ function createKernelManagementSection() {
 				)), 'warning');
 				return;
 			}
+			if (!progress) {
+				ui.addNotification(null, E('p', _('The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log.')), 'warning');
+				return;
+			}
+			if (progress.phase === 'failed') return;
 			ui.addNotification(null, E('p', localized('Clash service restarted successfully.', 'Служба успешно перезапущена.')), 'info');
 			await refresh();
 		} catch (e) {
