@@ -1,4 +1,5 @@
-name: build
+name: Build ASClash packages
+
 on:
   push:
     branches:
@@ -6,137 +7,168 @@ on:
   workflow_dispatch:
     inputs:
       release-tag:
-        description: 'Release Tag (vX.Y.Z)'
+        description: 'Release tag (for example v4.8.2.1)'
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
-  release:
-    name: Build and Release
+  build:
+    name: OpenWrt ${{ matrix.version }} (${{ matrix.pkg_format }})
     runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - version: "24.10.2"
+          - version: "24.10.8"
             pkg_format: "ipk"
             arch: "x86/64"
-          - version: "25.12.0-rc2"
+          - version: "25.12.6"
             pkg_format: "apk"
             arch: "x86/64"
-    
+
     env:
       PACKAGE_NAME: luci-app-asclash
-      SDK_URL_PATH: https://downloads.openwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.arch }}/
-      SDK_NAME: -sdk-
-      
+      SDK_URL_PATH: https://downloads.openwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.arch }}
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install Dependencies
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -yq gettext libncurses5-dev rsync xsltproc build-essential gawk unzip
-          
-      - name: Create Directories
+          sudo apt-get install -y gettext libncurses5-dev rsync xsltproc build-essential gawk unzip zstd
+
+      - name: Create SDK directories
         run: |
-          echo "SDK_DL_DIR=$(mktemp -d)" >> $GITHUB_ENV
-          echo "SDK_HOME=$(mktemp -d)" >> $GITHUB_ENV
-          
-      - name: Prepare Build Environment
+          echo "SDK_DL_DIR=$(mktemp -d)" >> "$GITHUB_ENV"
+          echo "SDK_HOME=$(mktemp -d)" >> "$GITHUB_ENV"
+
+      - name: Download and verify OpenWrt SDK
+        shell: bash
         run: |
           set -euo pipefail
           cd "$SDK_DL_DIR"
-          if ! ( wget -q -O - "$SDK_URL_PATH/sha256sums" | grep -- "$SDK_NAME" > sha256sums.small 2>/dev/null ) ; then
-            echo "Can not find ${SDK_NAME} file in sha256sums."
+
+          if ! curl -fsSL "$SDK_URL_PATH/sha256sums" \
+            | awk '$2 ~ /^\*?openwrt-sdk-/ && $2 ~ /\.tar\.zst$/ { print; found=1; exit } END { if (!found) exit 1 }' \
+            > sha256sums.sdk; then
+            echo "Could not find an OpenWrt SDK checksum for $SDK_URL_PATH" >&2
             exit 1
           fi
-          SDK_FILE="$(cut -d' ' -f2 < sha256sums.small | sed 's/*//g')"
-          wget -q -O "$SDK_FILE" "$SDK_URL_PATH/$SDK_FILE"
-          if ! sha256sum -c ./sha256sums.small >/dev/null 2>&1 ; then
-            echo "SDK can not be verified!"
+
+          SDK_FILE="$(awk '{ name = $2; sub(/^\*/, "", name); print name; exit }' sha256sums.sdk)"
+          if [[ -z "$SDK_FILE" ]]; then
+            echo "SDK checksum entry did not contain a filename" >&2
             exit 1
           fi
-          tar --zstd -xf "$SDK_DL_DIR/$SDK_FILE" -C "$SDK_HOME" --strip=1
-          
-      - name: Build Packages
+
+          echo "Downloading $SDK_FILE"
+          curl -fL --retry 3 --connect-timeout 20 "$SDK_URL_PATH/$SDK_FILE" -o "$SDK_FILE"
+          sha256sum -c sha256sums.sdk
+          tar --zstd -xf "$SDK_FILE" -C "$SDK_HOME" --strip-components=1
+
+      - name: Build package
+        shell: bash
         run: |
           set -euo pipefail
           cd "$SDK_HOME"
-          ./scripts/feeds update > /dev/null 2>&1
-          ./scripts/feeds install -a > /dev/null 2>&1
-          ln -s "${{ github.workspace }}/luci-app-asclash" "package/$PACKAGE_NAME"
-          make defconfig > /dev/null 2>&1
-          make package/${PACKAGE_NAME}/compile V=s
-          
-          # Find and copy all packages (handles both naming conventions)
-          find "$SDK_HOME/bin" -type f \( -name "${PACKAGE_NAME}_*.${{ matrix.pkg_format }}" -o -name "${PACKAGE_NAME}-*.${{ matrix.pkg_format }}" \) \
-           -exec cp -v -f {} "${{ github.workspace }}" \;
-          
-          # List copied files
-          echo "Copied packages:"
-          ls -lah "${{ github.workspace }}"/*.${{ matrix.pkg_format }}
-           
-      - name: Generate Release Notes
-        run: |
-          set -euo pipefail
-          echo "## Release ${{ github.event.inputs.release-tag }}" > release_notes_${{ matrix.version }}.md
-          echo "" >> release_notes_${{ matrix.version }}.md
-          echo "### OpenWrt ${{ matrix.version }} - ${{ matrix.pkg_format }} packages" >> release_notes_${{ matrix.version }}.md
-          echo "- Built with OpenWrt SDK ${{ matrix.version }}" >> release_notes_${{ matrix.version }}.md
-          echo "- Package format: ${{ matrix.pkg_format }}" >> release_notes_${{ matrix.version }}.md
-          echo "- Build date: $(date)" >> release_notes_${{ matrix.version }}.md
-          
-      - name: Upload Build Artifacts
+          ./scripts/feeds update
+          ./scripts/feeds install -a
+
+          package_path="package/$PACKAGE_NAME"
+          if [[ -e "$package_path" || -L "$package_path" ]]; then
+            echo "SDK already contains $package_path; refusing to overwrite it" >&2
+            exit 1
+          fi
+          ln -s "$GITHUB_WORKSPACE/$PACKAGE_NAME" "$package_path"
+
+          printf 'CONFIG_PACKAGE_%s=m\n' "$PACKAGE_NAME" >> .config
+          make defconfig
+          if ! grep -q "^CONFIG_PACKAGE_${PACKAGE_NAME}=m$" .config; then
+            echo "Kconfig did not select $PACKAGE_NAME for compilation" >&2
+            exit 1
+          fi
+          make "package/$PACKAGE_NAME/compile" V=s
+
+          mapfile -t built_packages < <(find "$SDK_HOME/bin/packages" -type f \
+            \( -name "${PACKAGE_NAME}_*.${{ matrix.pkg_format }}" \
+            -o -name "${PACKAGE_NAME}-*.${{ matrix.pkg_format }}" \))
+          if [[ ${#built_packages[@]} -eq 0 ]]; then
+            echo "No package with the expected format was produced" >&2
+            exit 1
+          fi
+
+          cp -v "${built_packages[@]}" "$GITHUB_WORKSPACE/"
+          printf 'Copied packages:\n'
+          printf ' - %s\n' "${built_packages[@]##*/}"
+
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: packages-${{ matrix.version }}-${{ matrix.pkg_format }}
+          name: packages-openwrt-${{ matrix.version }}-${{ matrix.pkg_format }}
           path: "*.${{ matrix.pkg_format }}"
-          retention-days: 1
-          
+          if-no-files-found: error
+          retention-days: 7
+
   create-release:
-    name: Create Release
-    needs: release
+    name: Publish GitHub release
+    needs: build
     runs-on: ubuntu-22.04
     if: github.event_name == 'workflow_dispatch'
-    
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Download all artifacts
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          
-      - name: Prepare release files
+
+      - name: Prepare release files and notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
         run: |
           set -euo pipefail
-          mkdir -p release_files
-          find artifacts -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} release_files/ \;
-          ls -lah release_files/
-          
-      - name: Generate Combined Release Notes
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          current_tag="${{ github.event.inputs.release-tag }}"
-          previous_tag="$(git tag --sort=-creatordate | grep -v -F "$current_tag" | head -n 1 || true)"
-          if [ -n "$previous_tag" ]; then
-            commit_subjects="$(git log --no-merges --pretty=format:'%s' "${previous_tag}..HEAD")"
-          else
-            commit_subjects="$(git log --no-merges --pretty=format:'%s')"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){2,3}$ ]]; then
+            echo "Invalid release tag '$RELEASE_TAG'; expected vX.Y.Z or vX.Y.Z.N" >&2
+            exit 1
           fi
 
-          echo "## Release ${{ github.event.inputs.release-tag }}" > release_notes.md
-          if [ -n "$commit_subjects" ]; then
-            echo "" >> release_notes.md
-            printf '%s\n' "$commit_subjects" >> release_notes.md
+          mkdir -p release_files
+          find artifacts -type f \
+            \( -name '*.ipk' -o -name '*.apk' \) \
+            -exec cp -v {} release_files/ \;
+          if ! find release_files -maxdepth 1 -type f | grep -q .; then
+            echo "No .ipk or .apk assets were downloaded" >&2
+            exit 1
           fi
-          
-      - name: Release and Upload Assets
+
+          previous_tag="$(git tag --sort=-creatordate | grep -v -F "$RELEASE_TAG" | head -n 1 || true)"
+          {
+            echo "## ASClash $RELEASE_TAG"
+            echo
+            if [[ -n "$previous_tag" ]]; then
+              git log --no-merges --pretty='- %s' "$previous_tag..HEAD"
+            else
+              git log --no-merges --pretty='- %s' -n 30 HEAD
+            fi
+          } > release_notes.md
+
+      - name: Create release and upload packages
         uses: softprops/action-gh-release@v2
         with:
           files: release_files/*
-          tag_name: ${{ github.event.inputs.release-tag }}
+          tag_name: ${{ inputs.release-tag }}
           body_path: release_notes.md
           draft: false
           prerelease: false
