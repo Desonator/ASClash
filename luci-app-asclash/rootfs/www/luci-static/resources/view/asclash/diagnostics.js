@@ -224,8 +224,8 @@ function statusPill(ok, yes, no) {
 	return E('span', { 'style': `display:inline-block;padding:3px 8px;border-radius:12px;background:${color};color:#fff;font-size:12px;font-weight:600;` }, ok ? yes : no);
 }
 
-function card(title, content) {
-	return E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;' }, [
+function card(title, content, extraStyle) {
+	return E('section', { 'class': 'cbi-section', 'style': `margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;min-height:0;box-sizing:border-box;${extraStyle || ''}` }, [
 		E('h3', { 'style': 'margin:0 0 6px;text-align:left;font-size:16px;line-height:20px;font-weight:600;' }, title), content
 	]);
 }
@@ -311,14 +311,14 @@ return view.extend({
 		const listDiagnostics = parseListDiagnostics(files[FILES.listDiagnostics]);
 		const warnings = String(logread.output || '').split(/\r?\n/).filter(line => /skip|invalid|warning|error|failed|exceed|refus/i.test(line)).slice(-30).map(formatDiagnosticLogLine);
 
-		const summary = E('div', { 'class': 'table' }, [
+		const summary = E('div', { 'class': 'table', 'style': 'text-align:left;line-height:16px;' }, [
 			E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:14px;align-items:center;' }, [
 				E('span', {}, [E('strong', {}, _('Clash service')), ' ', serviceRunning == null ? statePill('unknown') : statusPill(serviceRunning, serviceRunning ? _('Running') : _('Stopped'))]),
 				E('span', {}, [E('strong', {}, _('Mihomo API')), ' ', statePill(api.state)]),
 				E('span', {}, [E('strong', {}, _('nftables integration')), ' ', statusPill(nftOk, _('Present'), _('Missing / unreadable'))]),
 				E('span', {}, [E('strong', {}, _('Network mode')), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))])
 			]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:10px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
+			E('p', { 'class': 'cbi-section-descr', 'style': 'text-align:left;line-height:16px;margin:6px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
 		]);
 
 		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
@@ -423,7 +423,7 @@ return view.extend({
 				E('h2', { 'style': 'margin:0;' }, _('Diagnostics')), refresh
 			]),
 			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode.')),
-			card(_('Overall status'), summary),
+			card(_('Overall status'), summary, 'padding-bottom:5px;'),
 			modeCard,
 			listsCard,
 			warningCard
