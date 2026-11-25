@@ -335,6 +335,78 @@ msgstr "无法解析任何被引用的提供程序"
 msgid "Recent parser and firewall messages"
 msgstr "近期解析器和防火墙消息"
 
+msgid "Building rule lists"
+msgstr "正在生成规则列表"
+
+msgid "Last list operation: building (stale status)"
+msgstr "上次列表操作：生成中（状态已过期）"
+
+msgid "Applying firewall rules"
+msgstr "正在应用防火墙规则"
+
+msgid "Last list operation: applying (stale status)"
+msgstr "上次列表操作：应用中（状态已过期）"
+
+msgid "Last list operation completed"
+msgstr "上次列表操作已完成"
+
+msgid "Last list operation failed"
+msgstr "上次列表操作失败"
+
+msgid "No list operation status is available yet."
+msgstr "暂无列表操作状态。"
+
+msgid "List operation status is unknown"
+msgstr "列表操作状态未知"
+
+msgid "Rule-list generation and application"
+msgstr "规则列表生成与应用"
+
+msgid "Set is present"
+msgstr "集合已存在"
+
+msgid "Generated, but active set is missing"
+msgstr "已生成，但活动集合不存在"
+
+msgid "No entries to apply"
+msgstr "没有需要应用的条目"
+
+msgid "Current generated data is confirmed active"
+msgstr "已确认当前生成数据处于活动状态"
+
+msgid "Generated data does not match confirmed active data"
+msgstr "生成数据与已确认的活动数据不匹配"
+
+msgid "Presence checks verify the nftables set/chain and grouped source digest. They do not compare every kernel element with the source files."
+msgstr "存在性检查会验证 nftables 集合/链以及分组源摘要；不会逐项比较内核元素与源文件。"
+
+msgid "Malformed AND syntax or the action field is missing; check parentheses, commas and the rule target."
+msgstr "AND 语法错误或缺少动作字段；请检查括号、逗号和规则目标。"
+
+msgid "The rule has no target/action after the closing AND expression."
+msgstr "AND 表达式的右括号后缺少目标/动作。"
+
+msgid "No supported IP-CIDR or RULE-SET operand was found inside the AND expression."
+msgstr "AND 表达式中未找到受支持的 IP-CIDR 或 RULE-SET 操作数。"
+
+msgid "NETWORK is unsupported or specified more than once; use one TCP or UDP condition."
+msgstr "NETWORK 不受支持或重复指定；请仅使用一个 TCP 或 UDP 条件。"
+
+msgid "DST-PORT is missing or repeated; provide exactly one destination-port condition."
+msgstr "DST-PORT 缺失或重复；请仅指定一个目标端口条件。"
+
+msgid "DST-PORT has no usable port values; specify ports or ranges."
+msgstr "DST-PORT 没有有效端口值；请指定端口或范围。"
+
+msgid "Intentionally ignored terminal action %s (for example DIRECT/REJECT); it is not a parser failure."
+msgstr "已按设计忽略终止动作 %s（例如 DIRECT/REJECT）；这不是解析器错误。"
+
+msgid "Missing or inconsistent components: %s. Compare the configured mode with the active nftables chains, ip rules, routes and TUN interface; after changing network-mode settings, restart the Clash service."
+msgstr "以下组件缺失或不一致：%s。请检查配置模式与活动 nftables 链、ip 规则、路由和 TUN 接口；更改网络模式后请重启 Clash 服务。"
+
+msgid "If a parser item was skipped, review its reason above. For apply errors, check the first nftables or routing command failure in the raw log; do not clear or replace firewall rules manually until the cause is known."
+msgstr "若规则被解析器跳过，请查看上方原因。若应用失败，请在原始日志中检查首个 nftables 或路由命令错误；查明原因前不要手动清空或替换防火墙规则。"
+
 msgid "Please wait"
 msgstr "请稍候"
 

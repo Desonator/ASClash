@@ -57,6 +57,7 @@ readonly GROUPED_FAKEIP_DIGEST_FILE="/tmp/clash/fakeip_port_groups.digest"
 readonly GROUPED_FAKEIP_STATS_FILE="/tmp/clash/fakeip_port_groups.stats"
 readonly GROUPED_FAKEIP_BATCH_DIGEST_FILE="/tmp/clash/fakeip_port_groups.nft.digest"
 readonly GROUPED_FAKEIP_BATCH_CHECKSUM_FILE="/tmp/clash/fakeip_port_groups.nft.md5"
+readonly GROUPED_FAKEIP_APPLIED_DIGEST_FILE="/tmp/clash/fakeip_port_groups.applied.digest"
 readonly CLASH_RULES_UPDATE_LOCK="/tmp/clash/clash-rules-update.lock"
 readonly ASCLASH_LIST_PROGRESS_FILE="/tmp/clash/asclash-list-progress"
 ASCLASH_PROGRESS_ID=""
@@ -155,10 +156,13 @@ msg() {
 # operation id and a phase token; it is stored on tmpfs and atomically replaced.
 set_list_progress() {
     local phase="$1"
+    local updated_at
     [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="rules-$$"
+    updated_at=$(date +%s 2>/dev/null)
+    case "$updated_at" in ''|*[!0-9]*) updated_at=0 ;; esac
     mkdir -p "$(dirname "$ASCLASH_LIST_PROGRESS_FILE")" 2>/dev/null || return 1
     local tmp_file="${ASCLASH_LIST_PROGRESS_FILE}.$$"
-    printf '%s|%s\n' "$ASCLASH_PROGRESS_ID" "$phase" > "$tmp_file" || return 1
+    printf '%s|%s|%s\n' "$ASCLASH_PROGRESS_ID" "$phase" "$updated_at" > "$tmp_file" || return 1
     mv -f "$tmp_file" "$ASCLASH_LIST_PROGRESS_FILE"
 }
 
@@ -1454,8 +1458,10 @@ EOF
 # This avoids the memory-heavy ipv4_addr . inet_service concatenation set.
 apply_grouped_port_nft_rules() {
     [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ] || return 0
-    [ -f /tmp/clash/fakeip_port_groups ] || return 0
-    [ -s /tmp/clash/fakeip_port_groups ] || return 0
+    if [ ! -s /tmp/clash/fakeip_port_groups ]; then
+        rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
+        return 0
+    fi
     hash nft 2>/dev/null || return 0
 
     local batch="/tmp/clash/fakeip_port_groups.nft"
@@ -1597,6 +1603,9 @@ apply_grouped_port_nft_rules() {
             md5sum "$batch" 2>/dev/null | awk '{print $1}' > "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" && mv -f "${GROUPED_FAKEIP_BATCH_CHECKSUM_FILE}.tmp.$$" "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE"
         fi
         msg "Applied grouped fakeip port nft rules: $group_count groups, $cidr_count CIDR entries"
+        printf '%s\n' "$source_digest" > "${GROUPED_FAKEIP_APPLIED_DIGEST_FILE}.tmp.$$" \
+            && mv -f "${GROUPED_FAKEIP_APPLIED_DIGEST_FILE}.tmp.$$" "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE" \
+            || { warn "Grouped nft rules were applied but their confirmation marker could not be saved"; return 1; }
         return 0
     fi
     [ "$cache_hit" = "true" ] || rm -f "$batch_tmp"
@@ -4161,6 +4170,8 @@ stop() {
     rm -f /var/etc/asclash.include /var/etc/ssclash.include
 
     restore_bridge_nf_call
+
+    rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
 
     msg "Clash rules script stopped successfully (all routing rules cleaned up)"
 }

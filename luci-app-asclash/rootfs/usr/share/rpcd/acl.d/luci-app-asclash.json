@@ -12,6 +12,7 @@
                 "/opt/clash/lst/*.txt": [ "read" ],
                 "/opt/clash/lst/mrs_cache/.whitelist_src_digest": [ "read" ],
                 "/tmp/clash/fakeip_port_groups.digest": [ "read" ],
+                "/tmp/clash/fakeip_port_groups.applied.digest": [ "read" ],
                 "/tmp/clash/fakeip_port_groups.nft.digest": [ "read" ],
                 "/tmp/clash/fakeip_port_groups.stats": [ "read" ],
                 "/tmp/clash/fakeip_port_parser_diagnostics.txt": [ "read" ],

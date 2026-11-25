@@ -8,7 +8,10 @@ const FILES = {
 	settings: '/opt/clash/settings',
 	whitelist: '/opt/clash/lst/fakeip-whitelist-summary.txt',
 	grouped: '/opt/clash/lst/fakeip-port-summary.txt',
-	parserDiagnostics: '/tmp/clash/fakeip_port_parser_diagnostics.txt'
+	parserDiagnostics: '/tmp/clash/fakeip_port_parser_diagnostics.txt',
+	listProgress: '/tmp/clash/asclash-list-progress',
+	groupedSourceDigest: '/tmp/clash/fakeip_port_groups.digest',
+	groupedAppliedDigest: '/tmp/clash/fakeip_port_groups.applied.digest'
 };
 
 async function read(path) {
@@ -121,15 +124,15 @@ async function checkMihomoApi(config) {
 
 function formatGroupedSkipReason(reason) {
 	const labels = {
-		'malformed-rule-or-missing-action': _('Malformed rule or missing action'),
-		'missing-action': _('Missing action'),
-		'no-supported-ip-cidr-operand': _('No supported IP-CIDR or RULE-SET operand'),
-		'unsupported-or-multiple-network': _('Unsupported or multiple NETWORK conditions'),
-		'missing-or-multiple-dst-port': _('Missing or multiple DST-PORT conditions'),
-		'empty-dst-port': _('Empty DST-PORT condition')
+		'malformed-rule-or-missing-action': _('Malformed AND syntax or the action field is missing; check parentheses, commas and the rule target.'),
+		'missing-action': _('The rule has no target/action after the closing AND expression.'),
+		'no-supported-ip-cidr-operand': _('No supported IP-CIDR or RULE-SET operand was found inside the AND expression.'),
+		'unsupported-or-multiple-network': _('NETWORK is unsupported or specified more than once; use one TCP or UDP condition.'),
+		'missing-or-multiple-dst-port': _('DST-PORT is missing or repeated; provide exactly one destination-port condition.'),
+		'empty-dst-port': _('DST-PORT has no usable port values; specify ports or ranges.')
 	};
 	if (labels[reason]) return labels[reason];
-	if (reason.startsWith('excluded-action-')) return _('Ignored action: %s').format(reason.slice('excluded-action-'.length));
+	if (reason.startsWith('excluded-action-')) return _('Intentionally ignored terminal action %s (for example DIRECT/REJECT); it is not a parser failure.').format(reason.slice('excluded-action-'.length));
 	return reason;
 }
 
@@ -192,7 +195,7 @@ function card(title, content) {
 return view.extend({
 	load: async function() {
 		const paths = Object.values(FILES);
-		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning] = await Promise.all([
+		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain] = await Promise.all([
 			Promise.all(paths.map(read)),
 			command('/usr/sbin/nft', ['list', 'chains', 'inet']),
 			command('/sbin/ip', ['rule', 'show']),
@@ -200,17 +203,26 @@ return view.extend({
 			command('/sbin/ip', ['route', 'show', 'table', '101']),
 			command('/sbin/ip', ['link', 'show', 'clash-tun']),
 			command('/sbin/logread', ['-e', 'clash-rules']),
-			view_asclash_utils.getClashRunning().catch(() => null)
+			view_asclash_utils.getClashRunning().catch(() => null),
+			command('/usr/sbin/nft', ['list', 'set', 'inet', 'clash', 'fakeip_whitelist']),
+			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'CLASH_MARK'])
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
 		const api = await checkMihomoApi(files[FILES.config]);
-		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, api, checkedAt: new Date().toLocaleString() };
+		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain, api, checkedAt: new Date().toLocaleString() };
 	},
 
 	render: function(data) {
-		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, api, checkedAt } = data;
+		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, whitelistSet, markChain, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
+		const progressFields = String(files[FILES.listProgress] || '').trim().split('|');
+		const progressPhase = progressFields[1] || 'unknown';
+		const progressTime = Number(progressFields[2]) || 0;
+		const progressAge = progressTime ? Math.max(0, Math.floor(Date.now() / 1000) - progressTime) : null;
+		const progressFresh = progressAge != null && progressAge < 300;
+		const groupedSourceDigest = String(files[FILES.groupedSourceDigest] || '').trim();
+		const groupedAppliedDigest = String(files[FILES.groupedAppliedDigest] || '').trim();
 		const groupedEnabled = !/^GROUPED_FAKEIP_PORT_RULES_ENABLED=false\s*$/mi.test(files[FILES.settings] || '');
 		const parserReportAvailable = groupedEnabled && !!files[FILES.parserDiagnostics];
 		const parserReport = parserReportAvailable ? String(files[FILES.parserDiagnostics]).split(/\r?\n/).filter(Boolean).map(line => line.split('|')) : [];
@@ -251,6 +263,27 @@ return view.extend({
 			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:10px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
 		]);
 
+		const progressLabels = {
+			building: progressFresh ? _('Building rule lists') : _('Last list operation: building (stale status)'),
+			applying: progressFresh ? _('Applying firewall rules') : _('Last list operation: applying (stale status)'),
+			applied: _('Last list operation completed'),
+			failed: _('Last list operation failed')
+		};
+		const progressState = progressPhase === 'failed' ? 'error' : (progressPhase === 'building' || progressPhase === 'applying') && progressFresh ? 'warning' : progressPhase === 'applied' ? 'ok' : 'unknown';
+		const progressDetail = progressPhase === 'unknown'
+			? _('No list operation status is available yet.')
+			: `${progressLabels[progressPhase] || _('List operation status is unknown')}${progressTime ? ` · ${new Date(progressTime * 1000).toLocaleString()}` : ''}`;
+		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
+		const groupedActive = grouped.total === 0 || (!!groupedSourceDigest && groupedSourceDigest === groupedAppliedDigest && markChain.ok && /@fp_[a-f0-9]+/.test(markChain.output));
+		const listsCard = card(_('Rule-list generation and application'), E('div', {}, [
+			E('p', { 'style': 'margin:0 0 8px;' }, [statePill(progressState), ' ', progressDetail]),
+			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;' }, [
+				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [_('Fake-IP whitelist'), statusPill(whitelistActive, _('Set is present'), whitelist.total ? _('Generated, but active set is missing') : _('No entries to apply'))]),
+				E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [_('Grouped AND rules'), statusPill(groupedActive, _('Current generated data is confirmed active'), grouped.total ? _('Generated data does not match confirmed active data') : _('No entries to apply'))])
+			]),
+			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, _('Presence checks verify the nftables set/chain and grouped source digest. They do not compare every kernel element with the source files.'))
+		]));
+
 		const fakeCard = card(_('Fake-IP whitelist parser'), E('div', {}, [
 			E('p', { 'style': 'margin:0;' }, [_('Generated entries: '), E('strong', {}, String(whitelist.total)), ' · ', _('Providers: '), E('strong', {}, String(whitelist.providers.length))]),
 			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, [E('strong', {}, _('Parser notes: ')), fakeIpIssues.length ? fakeIpIssues.join('; ') : _('No recent Fake-IP parser errors in the log buffer.')])
@@ -269,9 +302,11 @@ return view.extend({
 				: proxyMode === 'tproxy'
 					? [[_('Firewall chains'), nftOk], [_('TPROXY rule'), tproxyRule], [_('Local route in table 100'), localRoute100]]
 					: [[_('Configured network mode'), false]];
+		const missingModeChecks = modeChecks.filter(([, ok]) => !ok).map(([label]) => label);
 		const modeCard = card(_('Network mode consistency'), E('div', {}, [
 			E('p', { 'style': 'margin:0 0 8px;' }, [_('Configured mode: '), E('strong', {}, modeLabel), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))]),
 			E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;' }, modeChecks.map(([label, ok]) => E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:4px;display:flex;justify-content:space-between;gap:8px;align-items:center;' }, [E('span', {}, label), statusPill(ok, _('Present'), _('Missing'))]))),
+			!routingOk ? E('p', { 'class': 'alert-message warning', 'style': 'margin:10px 0 0;' }, [_('Missing or inconsistent components: %s. Compare the configured mode with the active nftables chains, ip rules, routes and TUN interface; after changing network-mode settings, restart the Clash service.').format(missingModeChecks.join(', '))]) : null,
 			E('details', { 'style': 'margin-top:10px;' }, [
 				E('summary', { 'style': 'cursor:pointer;' }, _('Raw network details')),
 				E('h4', {}, _('nftables chains')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, nft.output || nft.error || _('No output')),
@@ -280,15 +315,16 @@ return view.extend({
 				E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty')),
 				E('h4', {}, _('TUN interface')), E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;' }, tunLink.output || tunLink.error || _('Not present'))
 			])
-		]));
+		].filter(Boolean)));
 
 		const warningContent = warnings.length
 			? E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;' }, warnings.join('\n'))
 			: E('p', { 'class': 'cbi-section-descr' }, _('No parser or firewall warnings found in the current system log buffer.'));
 		const warningCard = card(_('Recent parser and firewall messages'), E('div', {}, [
 			E('p', { 'class': 'cbi-section-descr' }, _('Recent matching log lines are shown for troubleshooting. This is not a complete history; the system log buffer may rotate.')),
+			warnings.length ? E('p', { 'class': 'alert-message warning' }, _('If a parser item was skipped, review its reason above. For apply errors, check the first nftables or routing command failure in the raw log; do not clear or replace firewall rules manually until the cause is known.')) : null,
 			warningContent
-		]));
+		].filter(Boolean)));
 
 		const refresh = E('button', { 'class': 'btn', 'click': () => window.location.reload() }, _('Refresh diagnostics'));
 		return E('div', { 'style': 'max-width:1100px;margin:0 auto;' }, [
@@ -298,6 +334,7 @@ return view.extend({
 			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode.')),
 			card(_('Overall status'), summary),
 			modeCard,
+			listsCard,
 			fakeCard,
 			groupedCard,
 			warningCard

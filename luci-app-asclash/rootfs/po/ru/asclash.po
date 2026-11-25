@@ -339,6 +339,78 @@ msgstr "Последние сообщения парсера и firewall"
 
 ### Общие строки ###
 
+msgid "Building rule lists"
+msgstr "Формирование списков правил"
+
+msgid "Last list operation: building (stale status)"
+msgstr "Последняя операция: формирование (статус устарел)"
+
+msgid "Applying firewall rules"
+msgstr "Применение правил файрвола"
+
+msgid "Last list operation: applying (stale status)"
+msgstr "Последняя операция: применение (статус устарел)"
+
+msgid "Last list operation completed"
+msgstr "Последняя операция со списками завершена"
+
+msgid "Last list operation failed"
+msgstr "Последняя операция со списками завершилась ошибкой"
+
+msgid "No list operation status is available yet."
+msgstr "Сведения об операциях со списками пока отсутствуют."
+
+msgid "List operation status is unknown"
+msgstr "Состояние операции со списками неизвестно"
+
+msgid "Rule-list generation and application"
+msgstr "Формирование и применение списков правил"
+
+msgid "Set is present"
+msgstr "Набор присутствует"
+
+msgid "Generated, but active set is missing"
+msgstr "Список сформирован, но активный набор отсутствует"
+
+msgid "No entries to apply"
+msgstr "Нет записей для применения"
+
+msgid "Current generated data is confirmed active"
+msgstr "Подтверждено применение текущих сформированных данных"
+
+msgid "Generated data does not match confirmed active data"
+msgstr "Сформированные данные не совпадают с подтверждёнными активными данными"
+
+msgid "Presence checks verify the nftables set/chain and grouped source digest. They do not compare every kernel element with the source files."
+msgstr "Проверяется наличие набора/цепочки nftables и совпадение digest сгруппированных источников. Каждый элемент в ядре с исходными файлами не сравнивается."
+
+msgid "Malformed AND syntax or the action field is missing; check parentheses, commas and the rule target."
+msgstr "Некорректный синтаксис AND или отсутствует действие; проверьте скобки, запятые и целевую группу."
+
+msgid "The rule has no target/action after the closing AND expression."
+msgstr "После закрывающей скобки AND не указана целевая группа/действие."
+
+msgid "No supported IP-CIDR or RULE-SET operand was found inside the AND expression."
+msgstr "В выражении AND не найден поддерживаемый операнд IP-CIDR или RULE-SET."
+
+msgid "NETWORK is unsupported or specified more than once; use one TCP or UDP condition."
+msgstr "NETWORK не поддерживается или указан несколько раз; используйте одно условие TCP либо UDP."
+
+msgid "DST-PORT is missing or repeated; provide exactly one destination-port condition."
+msgstr "DST-PORT отсутствует или указан несколько раз; задайте ровно одно условие портов назначения."
+
+msgid "DST-PORT has no usable port values; specify ports or ranges."
+msgstr "В DST-PORT нет допустимых значений; укажите порты или диапазоны."
+
+msgid "Intentionally ignored terminal action %s (for example DIRECT/REJECT); it is not a parser failure."
+msgstr "Завершающее действие %s намеренно пропущено (например, DIRECT/REJECT); это не ошибка парсера."
+
+msgid "Missing or inconsistent components: %s. Compare the configured mode with the active nftables chains, ip rules, routes and TUN interface; after changing network-mode settings, restart the Clash service."
+msgstr "Отсутствуют или не согласуются компоненты: %s. Сравните режим с активными цепочками nftables, правилами ip, маршрутами и интерфейсом TUN; после изменения режима перезапустите службу Clash."
+
+msgid "If a parser item was skipped, review its reason above. For apply errors, check the first nftables or routing command failure in the raw log; do not clear or replace firewall rules manually until the cause is known."
+msgstr "Если правило пропущено парсером, проверьте указанную выше причину. При ошибках применения найдите в журнале первую ошибку nftables или маршрутизации; не очищайте и не заменяйте правила файрвола вручную, пока причина неизвестна."
+
 msgid "Please wait"
 msgstr "Пожалуйста, подождите"
 
