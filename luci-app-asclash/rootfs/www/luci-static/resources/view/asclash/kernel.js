@@ -274,7 +274,7 @@ function createKernelManagementSection() {
 				rows.push(E('div', { style: 'margin-top:5px' }, `📦 ${_('Version')}: ${installed.version}`));
 			rows.push(E('div', { style: 'margin-top:5px' }, `🏗️ ${_('System Architecture')}: ${arch}`));
 			if (release) {
-				rows.push(E('div', { style: 'margin-top:5px' }, `🚀 ${_('Latest Available')}: ${release.version} (${release.repo})`));
+				rows.push(E('div', { style: 'margin-top:5px' }, `🚀 ${_('Latest Available')}: ${release.version}`));
 				const upToDate = installed.installed && normalizeVersion(installed.version) === normalizeVersion(release.version);
 				if (upToDate)
 					rows.push(E('div', { style: 'margin-top:5px;color:#28a745' }, `✨ ${_('Kernel is up to date')}`));

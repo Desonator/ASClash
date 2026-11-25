@@ -1020,7 +1020,7 @@ function createKernelDownloadSection(releaseRepo = OFFICIAL_MIHOMO_REPO, onRepoS
             if (release) {
                 if (downloadButton) downloadButton.disabled = false;
 
-                statusHTML += `<div style="margin-top: 5px;">🚀 ${_('Latest Available')}: ${release.version} (${release.repo})</div>`;
+                statusHTML += `<div style="margin-top: 5px;">🚀 ${_('Latest Available')}: ${release.version}</div>`;
 
                 const localVer = normalizeVersion(status.version);
                 const latestVer = normalizeVersion(release.version);
