@@ -1,6 +1,6 @@
 # ASClash — Advanced Simple Clash
 
-**ASClash** — LuCI-приложение для OpenWrt, которое управляет ядром Mihomo и направлением IPv4-трафика через TPROXY и/или TUN. Проект является форком [SSClash от ZeroChaos](https://github.com/zerolabnet/SSClash); форк развивается Desonator для OpenWrt.
+**ASClash** — LuCI-приложение для OpenWrt, которое управляет ядром Mihomo и направлением IPv4-трафика через TPROXY и/или TUN. Проект является форком [SSClash от ZeroChaos](https://github.com/zerolabnet/SSClash).
 
 **Язык:** русский — основной README. [English version](README.en.md).
 
