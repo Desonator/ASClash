@@ -1310,7 +1310,7 @@ msgstr "当 fake-ip-filter-mode 为“whitelist”或“rule”时，nftables �
 msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
 msgstr "此区域由 AND 规则中的 IP-CIDR 条目生成，条目可直接指定，也可来自非 DIRECT 规则引用的 provider。条目载入独立的 nftables IPv4 集合；端口范围和传输协议会保留，不会展开为 IP/端口对。仅当配置、规则或 provider 数据发生变化时，才会在服务启动及每次 clash-rules 更新（每 30 分钟）时刷新。"
 
-msgid "Force client DNS through the router (TCP/UDP port 53)"
+msgid "Force client DNS through the router (TCP/UDP 53)"
 msgstr "强制客户端 DNS 经由路由器（TCP/UDP 53 端口）"
 
 msgid "Redirects client DNS from ASClash-processed interfaces to the router resolver (dnsmasq must listen on port 53). Router-originated requests, WAN ingress and excluded interfaces are not intercepted. In Explicit mode with Fake-IP whitelist/rule, SRC-IP-CIDR DIRECT sources are exempt from this redirect. Devices already using router DNS via DHCP still use dnsmasq shared upstream; per-client DNS upstreams are not configured. New port-53 flows take precedence over later firewall redirects. DoT/DoH are not blocked."

@@ -1344,7 +1344,7 @@ msgstr "Этот список используется nftables для марк�
 msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
 msgstr "Этот блок автоматически формируется из IP-CIDR в AND-правилах — напрямую или через provider-ы, на которые ссылаются правила не DIRECT. Записи загружаются в отдельные наборы IPv4 nftables; диапазоны портов и транспорт сохраняются, а не разворачиваются в пары IP/порт. Блок обновляется при запуске службы и каждом обновлении clash-rules (раз в 30 минут), только если изменились конфигурация, правила или данные provider-ов."
 
-msgid "Force client DNS through the router (TCP/UDP port 53)"
+msgid "Force client DNS through the router (TCP/UDP 53)"
 msgstr "Принудительно направлять DNS клиентов через роутер (TCP/UDP порт 53)"
 
 msgid "Redirects client DNS from ASClash-processed interfaces to the router resolver (dnsmasq must listen on port 53). Router-originated requests, WAN ingress and excluded interfaces are not intercepted. In Explicit mode with Fake-IP whitelist/rule, SRC-IP-CIDR DIRECT sources are exempt from this redirect. Devices already using router DNS via DHCP still use dnsmasq shared upstream; per-client DNS upstreams are not configured. New port-53 flows take precedence over later firewall redirects. DoT/DoH are not blocked."
