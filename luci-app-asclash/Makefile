@@ -5,17 +5,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-asclash
-PKG_VERSION:=4.8.2.34
+PKG_VERSION:=4.8.2.35
 PKG_RELEASE:=1
 PKG_MAINTAINER:=Desonator <https://github.com/Desonator>
 
 LUCI_TITLE:=ASClash LuCI Support
-LUCI_DEPENDS:=+luci-base +coreutils-base64 +kmod-tun +curl
+LUCI_DEPENDS:=+luci-base +coreutils-base64 +firewall4 +kmod-nft-tproxy +kmod-tun +curl
 LUCI_PKGARCH:=all
-
-PKG_CONFIG_DEPENDS:= \
-	CONFIG_PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy \
-	CONFIG_PACKAGE_$(PKG_NAME)_Nftables_Transparent_Proxy
 
 PKG_BUILD_DEPENDS:=luci-base/host
 
@@ -29,23 +25,6 @@ define Package/$(PKG_NAME)
 	DEPENDS:=$(LUCI_DEPENDS)
 	PKGARCH:=$(LUCI_PKGARCH)
 	CONFLICTS:=luci-app-ssclash
-endef
-
-define Package/$(PKG_NAME)/config
-choice
-	prompt "Transparent Proxy Backend for ASClash"
-	default PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy if !PACKAGE_firewall4
-	default PACKAGE_$(PKG_NAME)_Nftables_Transparent_Proxy if PACKAGE_firewall4
-
-config PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy
-	bool "Iptables Transparent Proxy"
-	select PACKAGE_iptables-mod-tproxy
-
-config PACKAGE_$(PKG_NAME)_Nftables_Transparent_Proxy
-	bool "Nftables Transparent Proxy"
-	select PACKAGE_kmod-nft-tproxy
-
-endchoice
 endef
 
 define Package/$(PKG_NAME)/description

@@ -158,29 +158,76 @@ async function writeFile(path, content) {
         return fs.write(path, content);
     }
 
-    const tmpB64 = '/tmp/asclash-write.b64';
+    const tmpB64 = '/tmp/mihomo-write-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.b64';
     const b64 = encodeBase64Utf8(content);
 
-    await fs.exec('/bin/sh', ['-c', 'rm -f ' + shellQuote(tmpB64)]);
-
-    for (let offset = 0; offset < b64.length; offset += WRITE_CHUNK_SIZE) {
-        const chunk = b64.slice(offset, offset + WRITE_CHUNK_SIZE);
-        const op = offset === 0 ? '>' : '>>';
-        const res = await fs.exec('/bin/sh', ['-c',
-            'printf %s ' + shellQuote(chunk) + ' ' + op + ' ' + shellQuote(tmpB64)
-        ]);
-        if (res.code !== 0) {
-            throw new Error((res.stderr || res.stdout || '').trim() || 'chunk write failed');
+    try {
+        for (let offset = 0; offset < b64.length; offset += WRITE_CHUNK_SIZE) {
+            const chunk = b64.slice(offset, offset + WRITE_CHUNK_SIZE);
+            const op = offset === 0 ? '>' : '>>';
+            const res = await fs.exec('/bin/sh', ['-c',
+                'printf %s ' + shellQuote(chunk) + ' ' + op + ' ' + shellQuote(tmpB64)
+            ]);
+            if (res.code !== 0)
+                throw new Error((res.stderr || res.stdout || '').trim() || 'chunk write failed');
         }
-    }
 
-    const res = await fs.exec('/bin/sh', ['-c',
-        'base64 -d ' + shellQuote(tmpB64) + ' > ' + shellQuote(path) +
-        ' && rm -f ' + shellQuote(tmpB64)
-    ]);
-    if (res.code !== 0) {
-        throw new Error((res.stderr || res.stdout || '').trim() || 'decode write failed');
+        const res = await fs.exec('/bin/sh', ['-c',
+            'base64 -d ' + shellQuote(tmpB64) + ' > ' + shellQuote(path)
+        ]);
+        if (res.code !== 0)
+            throw new Error((res.stderr || res.stdout || '').trim() || 'decode write failed');
+    } finally {
+        await removeFile(tmpB64);
     }
+}
+
+async function removeFile(path) {
+    try {
+        await fs.exec('/bin/rm', ['-f', path]);
+    } catch (_e) {}
+}
+
+async function writeFileAtomic(path, content) {
+    const tempPath = path + '.tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    try {
+        await writeFile(tempPath, content);
+        const result = await fs.exec('/bin/mv', ['-f', tempPath, path]);
+        if (result.code !== 0)
+            throw new Error((result.stderr || result.stdout || '').trim() || 'atomic rename failed');
+    } catch (e) {
+        await removeFile(tempPath);
+        throw e;
+    }
+}
+
+async function stageValidatedConfig(content) {
+    const tempPath = '/opt/clash/config.yaml.tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    try {
+        await writeFile(tempPath, content);
+        const result = await fs.exec('/opt/clash/bin/clash', ['-d', '/opt/clash', '-f', tempPath, '-t']);
+        if (result.code !== 0) {
+            const detail = formatClashTestError(result.stdout, result.stderr);
+            await removeFile(tempPath);
+            return { ok: false, detail: detail || _('unknown error') };
+        }
+        return { ok: true, path: tempPath };
+    } catch (e) {
+        await removeFile(tempPath);
+        return { ok: false, detail: e.message || String(e) };
+    }
+}
+
+async function commitStagedConfig(tempPath) {
+    const result = await fs.exec('/bin/mv', ['-f', tempPath, '/opt/clash/config.yaml']);
+    if (result.code !== 0) {
+        await removeFile(tempPath);
+        throw new Error((result.stderr || result.stdout || '').trim() || 'config rename failed');
+    }
+}
+
+async function discardStagedConfig(tempPath) {
+    if (tempPath) await removeFile(tempPath);
 }
 
 function execDetached(script) {
@@ -294,6 +341,10 @@ return L.Class.extend({
     bumpRpcTimeout: bumpRpcTimeout,
     execDetached: execDetached,
     writeFile: writeFile,
+    writeFileAtomic: writeFileAtomic,
+    stageValidatedConfig: stageValidatedConfig,
+    commitStagedConfig: commitStagedConfig,
+    discardStagedConfig: discardStagedConfig,
     formatClashTestError: formatClashTestError,
     formatClashLogMessage: formatClashLogMessage,
     getClashRunning: getClashRunning,

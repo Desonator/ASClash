@@ -232,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.34';
+const ASCLASH_VERSION = '4.8.2.35';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -300,41 +300,35 @@ return view.extend({
             'style': 'margin: 8px 0 14px; padding: 9px 12px; border-left: 3px solid ' + (validatorInfo.sourceMismatch ? '#e0a800' : '#1684d6') + '; background: rgba(127,127,127,0.08);'
         }, validatorNoticeContent);
 
-        const writeAndTestConfig = async function() {
+        const validateAndStageConfig = async function() {
             const value = editor.getValue().trim() + '\n';
-
-            await view_asclash_utils.writeFile('/opt/clash/config.yaml', value);
-            ui.addNotification(null, E('p', _('Configuration saved successfully.')), 'info');
-
-            const testResult = await fs.exec('/opt/clash/bin/clash', ['-d', '/opt/clash', '-t']);
-            if (testResult.code !== 0) {
-                const detail = view_asclash_utils.formatClashTestError(
-                    testResult.stdout, testResult.stderr
-                );
-
+            const previousConfig = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+            const staged = await view_asclash_utils.stageValidatedConfig(value);
+            if (!staged.ok) {
                 ui.addNotification(null, E('div', {}, [
                     E('p', _('Configuration test failed — service not reloaded. Please fix the errors below:')),
                     E('pre', {
                         'style': 'margin: 6px 0 0; padding: 0 0 0 10px; font-size: 11px; line-height: 1.45; font-family: monospace; white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow: auto; background: none; border: 0; border-left: 2px solid rgba(0,0,0,0.18);'
-                    }, detail || _('unknown error'))
+                    }, staged.detail || _('unknown error'))
                 ]), 'error');
                 return null;
             }
 
-            return value;
+            return { value, previousConfig, stagedPath: staged.path };
         };
 
         const saveAndRestartCore = async function() {
             if (startStopButton) startStopButton.disabled = true;
+            let stagedConfig = null;
             try {
-                const value = await writeAndTestConfig();
-                if (value === null) return;
+                stagedConfig = await validateAndStageConfig();
+                if (stagedConfig === null) return;
 
                 const progressBefore = await view_asclash_utils.getListProgress();
 
-                try {
-                    await view_asclash_utils.execDetached('/etc/init.d/clash reload');
-                } catch (e) {}
+                await view_asclash_utils.commitStagedConfig(stagedConfig.stagedPath);
+                ui.addNotification(null, E('p', _('Configuration saved successfully.')), 'info');
+                await view_asclash_utils.execDetached('/etc/init.d/clash reload');
 
                 ui.addNotification(null, E('p', _('Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts.')), 'info');
                 watchListProgress(progressBefore);
@@ -352,6 +346,8 @@ return view.extend({
                     ui.addNotification(null, E('p', _('The service restarted, but list application could not be confirmed yet. Check Diagnostics and the system log.')), 'warning');
                 }
             } catch(e) {
+                if (stagedConfig && stagedConfig.stagedPath)
+                    await view_asclash_utils.discardStagedConfig(stagedConfig.stagedPath);
                 ui.addNotification(null, E('p', _('Unable to save contents: %s').format(e.message)), 'error');
             } finally {
                 if (startStopButton) startStopButton.disabled = false;
@@ -360,6 +356,7 @@ return view.extend({
 
         const saveAndReloadConfig = async function() {
             if (startStopButton) startStopButton.disabled = true;
+            let staged = null;
             try {
                 if (!(await getServiceStatus())) {
                     ui.addNotification(null, E('p',
@@ -368,8 +365,9 @@ return view.extend({
                     return;
                 }
 
-                const value = await writeAndTestConfig();
-                if (value === null) return;
+                staged = await validateAndStageConfig();
+                if (staged === null) return;
+                const value = staged.value;
 
                 const ec = parseYamlValue(value, 'external-controller');
                 const ecTls = parseYamlValue(value, 'external-controller-tls');
@@ -383,12 +381,13 @@ return view.extend({
                 );
                 const scheme = useTls ? 'https' : 'http';
 
+                const stagedName = staged.stagedPath.substring('/opt/clash/'.length);
                 const curlArgs = [
                     '-sS', '-o', '/dev/null', '-w', '%{http_code}',
                     '-X', 'PUT',
                     '-H', 'Content-Type: application/json',
                     '-H', 'Authorization: Bearer ' + secret,
-                    '--data', '{"path":"","payload":""}',
+                    '--data', JSON.stringify({ path: stagedName, payload: '' }),
                     '--connect-timeout', '5',
                     '--max-time', '15'
                 ];
@@ -401,6 +400,7 @@ return view.extend({
                 const httpCode = (res.stdout || '').trim();
 
                 if (res.code !== 0 || (httpCode !== '204' && httpCode !== '200')) {
+                    await view_asclash_utils.discardStagedConfig(staged.stagedPath);
                     let detail = (res.stderr || '').trim();
                     if (useTls && /Protocol\s+"?https"?\s+not\s+supported/i.test(detail)) {
                         detail += ' ' + _('(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)');
@@ -411,6 +411,15 @@ return view.extend({
                     ), 'error');
                     return;
                 }
+
+                try {
+                    await view_asclash_utils.commitStagedConfig(staged.stagedPath);
+                } catch (e) {
+                    await view_asclash_utils.discardStagedConfig(staged.stagedPath);
+                    ui.addNotification(null, E('p', _('Configuration was loaded into Mihomo, but could not be saved to disk: %s').format(e.message || String(e))), 'error');
+                    return;
+                }
+                ui.addNotification(null, E('p', _('Configuration saved successfully.')), 'info');
 
                 const progressBefore = await view_asclash_utils.getListProgress();
                 try {
@@ -431,6 +440,8 @@ return view.extend({
                     getServiceStatus, true, 5000
                 );
             } catch(e) {
+                if (staged && staged.stagedPath)
+                    await view_asclash_utils.discardStagedConfig(staged.stagedPath);
                 ui.addNotification(null, E('p',
                     _('Config reload error: %s. Try "Save & Restart core" for a full restart.').format(e.message)
                 ), 'error');

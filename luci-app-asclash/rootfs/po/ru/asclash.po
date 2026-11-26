@@ -641,6 +641,21 @@ msgstr "Не удалось открыть панель управления: %s
 msgid "Configuration saved successfully."
 msgstr "Конфигурация успешно сохранена."
 
+msgid "Validated configuration could not be saved: %s"
+msgstr "Проверенная конфигурация не сохранена: %s"
+
+msgid "Updated Clash configuration failed validation; settings were not saved."
+msgstr "Изменённая конфигурация Clash не прошла проверку; настройки не сохранены."
+
+msgid "The previous configuration was restored on disk."
+msgstr "Предыдущая конфигурация восстановлена на диске."
+
+msgid "Configuration was loaded into Mihomo, but could not be saved to disk: %s"
+msgstr "Конфигурация загружена в Mihomo, но не сохранена на диск: %s"
+
+msgid "The previous configuration could not be restored: %s"
+msgstr "Не удалось восстановить предыдущую конфигурацию: %s"
+
 msgid "Configuration test failed — service not reloaded. Please fix the errors below:"
 msgstr "Проверка конфигурации завершилась с ошибкой — служба не была перезагружена. Пожалуйста, исправьте следующие ошибки:"
 
@@ -1396,8 +1411,8 @@ msgstr "API Mihomo вернул неожиданный ответ со спис�
 msgid "TPROXY test: sampling active LAN TCP traffic, pass %d of %d…"
 msgstr "Тест TPROXY: наблюдение за активным LAN TCP-трафиком, проход %d из %d…"
 
-msgid "TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data."
-msgstr "TPROXY подтверждён: активное LAN TCP-соединение появилось в Mihomo и передавало данные."
+msgid "TPROXY confirmed: an active LAN TCP connection arrived through Mihomo’s TPROXY inbound and transferred data."
+msgstr "TPROXY подтверждён: активное LAN TCP-соединение пришло через TPROXY-вход Mihomo и передавало данные."
 
 msgid "Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect."
 msgstr "Возможен сбой приёма TPROXY: %d повторно передаваемых LAN-потоков не появились в Mihomo при росте счётчиков TPROXY. Это предупреждение, а не доказательство дефекта ядра."
@@ -1410,6 +1425,9 @@ msgstr "Результат не определён: не удалось сопо
 
 msgid "Mihomo TCP traffic increased, but no growing connection was identified as coming from a processed LAN interface."
 msgstr "Объём TCP-трафика Mihomo вырос, но ни одно растущее соединение не удалось отнести к обрабатываемому LAN-интерфейсу."
+
+msgid "Mihomo showed active TCP connections, but none was identified as a TPROXY inbound."
+msgstr "API Mihomo показал активные TCP-соединения, но ни одно не распознано как принятое через TPROXY."
 
 msgid "No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic."
 msgstr "За время проверки API Mihomo не показал активных TCP-соединений. Это не исключает передачу трафика по UDP/QUIC."

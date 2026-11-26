@@ -306,6 +306,13 @@ setup_dns() {
 
 # Function to restore DNS settings
 restore_dns() {
+	# Without our ownership backup we cannot distinguish settings we changed
+	# from pre-existing dnsmasq configuration. Preserve user values in that case.
+	if [ ! -f "$DNS_BACKUP_FILE" ]; then
+		msg "No DNS backup found; leaving dnsmasq settings unchanged"
+		return 0
+	fi
+
 	local dns_server=""
 	local dns_server_owned="1"
 	local legacy_dns_server_owned="0"
@@ -335,9 +342,7 @@ restore_dns() {
 		uci del_list dhcp.@dnsmasq[0].server="$legacy_dns_server" 2>/dev/null
 	fi
 
-	# Restore the exact original values we saved before modifying them.
-	# If no backup file exists (e.g. service stopped without having been fully
-	# started), fall back to simply deleting our settings.
+	# Restore the exact original values captured before modifying dnsmasq.
 	local orig_cachesize=""
 	local orig_noresolv=""
 	if [ -f "$DNS_BACKUP_FILE" ]; then

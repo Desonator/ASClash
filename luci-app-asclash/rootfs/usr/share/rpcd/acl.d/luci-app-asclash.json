@@ -49,7 +49,9 @@
         "write": {
             "file": {
                 "/opt/clash/config.yaml": [ "write" ],
+                "/opt/clash/config.yaml.tmp-*": [ "read", "write", "remove" ],
                 "/opt/clash/settings": [ "write" ],
+                "/opt/clash/settings.tmp-*": [ "write", "remove" ],
                 "/opt/clash/bin/clash": [ "write" ],
                 "/opt/clash/lst/*.txt": [ "write", "remove" ],
                 "/opt/clash/bin/clash-rules": [ "exec" ],

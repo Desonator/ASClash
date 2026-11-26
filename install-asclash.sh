@@ -1,7 +1,7 @@
 #!/bin/sh
 # ================================================================
 #  ASClash Auto-Installer for OpenWrt
-#  Поддерживаемые версии: 21.x / 23.05.x / 24.10.x / 25.12.x
+#  Поддерживаемые версии: OpenWrt 22.03+ с firewall4/nftables
 #  Архитектуры: arm64, armv7/armv6/armv5, amd64, 386,
 #  mips/mipsel (soft/hardfloat), mips64/mips64le, riscv64, loong64
 #  https://github.com/Desonator/ASClash
@@ -79,12 +79,12 @@ detect_openwrt() {
     fi
     info "Пакетный менеджер: ${B}${PKG_MGR}${N}"
 
-    # Для OpenWrt 21.x нужен iptables-mod-tproxy вместо kmod-nft-tproxy
-    if [ "${OW_MAJOR:-0}" -le 21 ] 2>/dev/null; then
-        TPROXY_PKG="iptables-mod-tproxy"
-    else
-        TPROXY_PKG="kmod-nft-tproxy"
-    fi
+    case "$OW_MAJOR" in
+        ''|*[!0-9]*) die "Не удалось определить версию OpenWrt: $OW_RELEASE" ;;
+    esac
+    [ "$OW_MAJOR" -ge 22 ] || die "Требуется OpenWrt 22.03 или новее с firewall4/nftables; iptables не поддерживается"
+
+    TPROXY_PKG="kmod-nft-tproxy"
     info "Пакет tproxy: ${B}${TPROXY_PKG}${N}"
 }
 

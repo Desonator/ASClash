@@ -572,8 +572,8 @@ HWID_DEVICE_OS=${hwidDeviceOS}
 MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
 `;
 
-        await fs.write('/opt/clash/settings', settingsContent);
-
+        const previousSettings = await L.resolveDefault(fs.read('/opt/clash/settings'), '');
+        let configStage = null;
         const configContent = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
         if (configContent) {
             let updatedConfig = transformProxyMode(configContent, proxyMode, tunStack);
@@ -590,7 +590,31 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
                 );
             }
 
-            await view_asclash_utils.writeFile('/opt/clash/config.yaml', updatedConfig);
+            configStage = await view_asclash_utils.stageValidatedConfig(updatedConfig);
+            if (!configStage.ok) {
+                ui.addNotification(null, E('div', {}, [
+                    E('p', _('Updated Clash configuration failed validation; settings were not saved.')),
+                    E('pre', {
+                        'style': 'margin:6px 0 0;padding:0 0 0 10px;font-size:11px;line-height:1.45;font-family:monospace;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto;background:none;border:0;border-left:2px solid rgba(0,0,0,0.18);'
+                    }, configStage.detail || _('unknown error'))
+                ]), 'error');
+                return false;
+            }
+        }
+
+        try {
+            await view_asclash_utils.writeFileAtomic('/opt/clash/settings', settingsContent);
+            if (configStage)
+                await view_asclash_utils.commitStagedConfig(configStage.path);
+        } catch (e) {
+            if (configStage)
+                await view_asclash_utils.discardStagedConfig(configStage.path);
+            try {
+                await view_asclash_utils.writeFileAtomic('/opt/clash/settings', previousSettings);
+            } catch (rollbackError) {
+                e.message += '; failed to restore previous settings: ' + (rollbackError.message || String(rollbackError));
+            }
+            throw e;
         }
 
         ui.addNotification(null, E('p', _('Settings saved. Please restart the Clash service for changes to take effect.')), 'info');

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# This script configures nftables or iptables to redirect network traffic
+# This script configures nftables/firewall4 to redirect network traffic
 # through the Clash proxy based on settings defined in /opt/clash/settings.
 # It supports two modes:
 # 1. Exclude Mode: Proxies all traffic except from specified interfaces (e.g., WAN).
@@ -62,6 +62,7 @@ readonly GROUPED_FAKEIP_BATCH_CHECKSUM_FILE="/tmp/clash/fakeip_port_groups.nft.m
 readonly GROUPED_FAKEIP_APPLIED_DIGEST_FILE="/tmp/clash/fakeip_port_groups.applied.digest"
 readonly GROUPED_FAKEIP_MISSING_SOURCES_FILE="/tmp/clash/fakeip_port_missing_sources.txt"
 readonly CLASH_RULES_UPDATE_LOCK="/tmp/clash/clash-rules-update.lock"
+ASCLASH_OPERATION_LOCK_HELD="false"
 readonly ASCLASH_LIST_PROGRESS_FILE="/tmp/clash/asclash-list-progress"
 readonly ASCLASH_LIST_DIAGNOSTICS_FILE="/tmp/clash/asclash-list-diagnostics.txt"
 ASCLASH_PROGRESS_ID=""
@@ -144,6 +145,35 @@ acquire_update_lock() {
 release_update_lock() {
     rmdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null
     trap - EXIT INT TERM
+}
+
+# Serialize firewall table rebuilds with list updates. Update cycles can call
+# start() while holding this lock; external start/stop/restart requests acquire
+# it through this reentrant wrapper.
+with_operation_lock() {
+    local operation="$1"
+    shift
+    if [ "$ASCLASH_OPERATION_LOCK_HELD" = "true" ]; then
+        "$operation" "$@"
+        return $?
+    fi
+    mkdir -p /tmp/clash || return 1
+    local waited=0
+    while ! mkdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null; do
+        if [ "$waited" -ge 30 ]; then
+            warn "Timed out waiting for the ASClash rules operation lock"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    trap 'rmdir "$CLASH_RULES_UPDATE_LOCK" 2>/dev/null' EXIT INT TERM
+    ASCLASH_OPERATION_LOCK_HELD="true"
+    "$operation" "$@"
+    local rc=$?
+    ASCLASH_OPERATION_LOCK_HELD="false"
+    release_update_lock
+    return "$rc"
 }
 
 # Unified marks / policy routing tables
@@ -814,13 +844,6 @@ cache_subscription_ips() {
 # =============================================================================
 # SECTION: Interface detection — LAN/WAN discovery, include/exclude lists
 # =============================================================================
-
-# Function to check if chain exists (iptables only)
-chain_exists() {
-    local table="$1"
-    local chain="$2"
-    iptables -t "$table" -L "$chain" >/dev/null 2>&1
-}
 
 # Function to extract fake-ip configuration from config.yaml
 extract_fake_ip_config() {
@@ -1916,11 +1939,24 @@ extract_ipv4_cidr_from_rule_provider_file() {
 extract_classical_and_ipcidr_entries() {
     local file="$1"
     [ -f "$file" ] || return 0
+    local temp_dir rule_file rule_id operand_csv network ports current_file next_file single_file operand_count valid_rule cidr
+    temp_dir="/tmp/clash/nested_and_$$"
+    rule_file="$temp_dir.rules"
+    mkdir -p /tmp/clash || return 1
     awk '
     {
         line=$0
         sub(/#.*/, "", line)
         if (line !~ /AND,/) next
+        body=substr(line, index(line, "AND,")+4)
+        residual=body
+        network_count=gsub(/NETWORK,/, "", residual)
+        port_count=gsub(/DST-PORT,/, "", residual)
+        gsub(/IP-CIDR,[^,()[:space:]]+/, "", residual)
+        gsub(/NETWORK,[A-Za-z0-9_-]+/, "", residual)
+        gsub(/DST-PORT,[0-9,-]+/, "", residual)
+        gsub(/[(),[:space:]]/, "", residual)
+        if (residual != "" || network_count > 1 || port_count != 1) next
         network="*"
         if (match(line, /NETWORK,[A-Za-z0-9_-]+/)) {
             network=substr(line, RSTART+8, RLENGTH-8)
@@ -1929,13 +1965,57 @@ extract_classical_and_ipcidr_entries() {
         if (!match(line, /DST-PORT,[0-9,-]+/)) next
         ports=substr(line, RSTART+9, RLENGTH-9)
         rest=line
+        operands=""
+        count=0
         while (match(rest, /IP-CIDR,[^,()[:space:]]+/)) {
             cidr=substr(rest, RSTART+8, RLENGTH-8)
-            if (cidr != "" && index(cidr, ":") == 0)
-                print cidr "|" network "|" ports
+            if (cidr != "" && index(cidr, ":") == 0) {
+                if (count++) operands=operands ","
+                operands=operands cidr
+            }
             rest=substr(rest, RSTART+RLENGTH)
         }
-    }' "$file"
+        if (count > 0) print NR "|" operands "|" network "|" ports
+    }' "$file" > "$rule_file" || { rm -f "$rule_file"; return 1; }
+
+    while IFS='|' read -r rule_id operand_csv network ports; do
+        [ -n "$operand_csv" ] || continue
+        local operands_file="${temp_dir}.${rule_id}.operands"
+        printf '%s\n' "$operand_csv" | tr ',' '\n' > "$operands_file"
+        current_file="${temp_dir}.${rule_id}.0"
+        next_file="${temp_dir}.${rule_id}.next"
+        single_file="${temp_dir}.${rule_id}.single"
+        : > "$current_file"
+        operand_count=0
+        valid_rule="true"
+
+        while IFS= read -r cidr; do
+            [ -n "$cidr" ] || continue
+            if ! is_valid_ipv4_cidr "$cidr"; then
+                valid_rule="false"
+                break
+            fi
+            if [ "$operand_count" -eq 0 ]; then
+                printf '%s\n' "$cidr" > "$current_file"
+            else
+                printf '%s\n' "$cidr" > "$single_file"
+                intersect_ipv4_cidr_files "$current_file" "$single_file" > "$next_file" || {
+                    valid_rule="false"
+                    break
+                }
+                mv -f "$next_file" "$current_file"
+            fi
+            operand_count=$((operand_count + 1))
+        done < "$operands_file"
+
+        if [ "$valid_rule" = "true" ] && [ -s "$current_file" ]; then
+            while IFS= read -r cidr; do
+                [ -n "$cidr" ] && printf '%s|%s|%s\n' "$cidr" "$network" "$ports"
+            done < "$current_file"
+        fi
+        rm -f "$operands_file" "$current_file" "$next_file" "$single_file"
+    done < "$rule_file"
+    rm -f "$rule_file"
 }
 
 # Validate a provider stream in one AWK process rather than spawning grep for
@@ -2826,13 +2906,8 @@ validate_forward_state() {
             nft list chain inet clash forward >/dev/null 2>&1 || return 1
             return 0
         fi
-    elif hash iptables 2>/dev/null; then
-        iptables -t filter -C INPUT -i clash-tun -j ACCEPT 2>/dev/null || return 1
-        iptables -t filter -C FORWARD -i clash-tun -j ACCEPT 2>/dev/null || return 1
-        iptables -t filter -C FORWARD -o clash-tun -j ACCEPT 2>/dev/null || return 1
-        return 0
     fi
-    return 0
+    return 1
 }
 
 # Idempotently restore the clash-tun forward accept rules.
@@ -2850,9 +2925,9 @@ repair_forward_rules() {
         # then re-apply fresh rules against the newly rebuilt fw4 table.
         teardown_nft_tun_forward_rules
         apply_nft_tun_forward_rules
-    elif hash iptables 2>/dev/null; then
-        teardown_iptables_tun_forward_rules
-        apply_iptables_tun_forward_rules
+    else
+        warn "Cannot repair TUN forwarding without nftables/firewall4"
+        return 1
     fi
 }
 
@@ -3290,7 +3365,7 @@ rollback_nft_rules() {
 
 # Apply nftables rules dynamically
 # =============================================================================
-# SECTION: Firewall rules — nftables and iptables implementations
+# SECTION: Firewall rules — nftables/firewall4 implementation
 # =============================================================================
 
 apply_nft_rules() {
@@ -3538,6 +3613,10 @@ apply_iptables_rules() {
 
 update_rules() {
     msg "Intelligently updating subscription IPs..."
+    if ! hash nft 2>/dev/null; then
+        warn "Cannot update ASClash rules without nftables/firewall4"
+        return 1
+    fi
 
     # Also refresh the auto-generated fakeip whitelist on this same cron cycle
     # (runs every 30 minutes by default). update_fakeip_whitelist_sets is a
@@ -3571,85 +3650,44 @@ update_rules() {
 
     msg "Subscription IPs have changed. Applying delta update."
 
-    if hash nft 2>/dev/null && nft list set inet clash proxy_servers >/dev/null 2>&1; then
-        # Rebuild from the complete current server list, not only subscription
-        # IPs. The set also contains static `proxies:` servers and must retain
-        # them after a subscription-cache change. Apply flush+populate as one
-        # nft transaction so a failed add leaves the previous set intact.
-        msg "Updating nftables proxy_servers set..."
-        local all_server_ips unique_ips nft_batch
-        all_server_ips=$(extract_server_ips)
-        unique_ips=$(printf '%s\n' "$all_server_ips" | grep -v '^$' | sort -u)
-        nft_batch="/tmp/clash/proxy_servers_update.$$"
-        {
-            printf 'flush set inet clash proxy_servers\n'
-            if [ -n "$unique_ips" ]; then
-                printf '%s\n' "$unique_ips" | awk '
-                    BEGIN { count=0; line="" }
-                    {
-                        if (count > 0) line = line ", "
-                        line = line $0
-                        count++
-                        if (count >= 500) {
-                            print "add element inet clash proxy_servers { " line " }"
-                            count=0; line=""
-                        }
+    # Rebuild from the complete current server list, not only subscription
+    # IPs. The set also contains static `proxies:` servers and must retain
+    # them after a subscription-cache change. Apply flush+populate as one
+    # nft transaction so a failed add leaves the previous set intact.
+    if ! nft list set inet clash proxy_servers >/dev/null 2>&1; then
+        warn "nftables proxy_servers set is missing; refusing to apply subscription IP changes"
+        return 1
+    fi
+    msg "Updating nftables proxy_servers set..."
+    local all_server_ips unique_ips nft_batch
+    all_server_ips=$(extract_server_ips)
+    unique_ips=$(printf '%s\n' "$all_server_ips" | grep -v '^$' | sort -u)
+    nft_batch="/tmp/clash/proxy_servers_update.$$"
+    {
+        printf 'flush set inet clash proxy_servers\n'
+        if [ -n "$unique_ips" ]; then
+            printf '%s\n' "$unique_ips" | awk '
+                BEGIN { count=0; line="" }
+                {
+                    if (count > 0) line = line ", "
+                    line = line $0
+                    count++
+                    if (count >= 500) {
+                        print "add element inet clash proxy_servers { " line " }"
+                        count=0; line=""
                     }
-                    END { if (count > 0) print "add element inet clash proxy_servers { " line " }" }
-                '
-            fi
-        } > "$nft_batch"
-        if nft -c -f "$nft_batch" && nft -f "$nft_batch"; then
-            rm -f "$nft_batch"
-            msg "Updated proxy_servers set with $(printf '%s\n' "$unique_ips" | grep -c . | xargs) current server IPs."
-        else
-            rm -f "$nft_batch"
-            msg "ERROR: Failed to update proxy_servers set; previous entries were preserved"
-            return 1
+                }
+                END { if (count > 0) print "add element inet clash proxy_servers { " line " }" }
+            '
         fi
-    elif hash iptables 2>/dev/null; then
-        # For iptables, find the difference and apply changes incrementally.
-        # Create temporary files for comparison
-        local old_sorted="/tmp/clash/clash_old_ips.$$"
-        local new_sorted="/tmp/clash/clash_new_ips.$$"
-
-        echo "$old_ips" | sort -u > "$old_sorted"
-        echo "$new_ips" | sort -u > "$new_sorted"
-
-        local ips_to_remove=$(comm -23 "$old_sorted" "$new_sorted")
-        local ips_to_add=$(comm -13 "$old_sorted" "$new_sorted")
-
-        # Clean up temporary files
-        rm -f "$old_sorted" "$new_sorted"
-
-        msg "Updating iptables rules..."
-
-        if [ -n "$ips_to_remove" ]; then
-            echo "$ips_to_remove" | while IFS= read -r ip; do
-                [ -z "$ip" ] && continue
-                iptables -t mangle -D CLASH_PROCESS -d "$ip/32" -j RETURN 2>/dev/null
-                iptables -t mangle -D CLASH_PROCESS -s "$ip/32" -j RETURN 2>/dev/null
-                iptables -t mangle -D CLASH_LOCAL -d "$ip/32" -j RETURN 2>/dev/null
-                iptables -t mangle -D CLASH_LOCAL -s "$ip/32" -j RETURN 2>/dev/null
-            done
-            msg "Removed $(echo "$ips_to_remove" | wc -l | xargs) old IP rules."
-        fi
-
-        if [ -n "$ips_to_add" ]; then
-            echo "$ips_to_add" | while IFS= read -r ip; do
-                [ -z "$ip" ] && continue
-                iptables -t mangle -A CLASH_PROCESS -d "$ip/32" -j RETURN
-                iptables -t mangle -A CLASH_PROCESS -s "$ip/32" -j RETURN
-                iptables -t mangle -A CLASH_LOCAL -d "$ip/32" -j RETURN
-                iptables -t mangle -A CLASH_LOCAL -s "$ip/32" -j RETURN
-            done
-            msg "Added $(echo "$ips_to_add" | wc -l | xargs) new IP rules."
-        fi
-        msg "iptables rules updated successfully."
+    } > "$nft_batch"
+    if nft -c -f "$nft_batch" && nft -f "$nft_batch"; then
+        rm -f "$nft_batch"
+        msg "Updated proxy_servers set with $(printf '%s\n' "$unique_ips" | grep -c . | xargs) current server IPs."
     else
-        # If no supported method is found, fall back to the old behavior.
-        msg "No active rules found or update method not supported. Falling back to full restart."
-        stop && start
+        rm -f "$nft_batch"
+        msg "ERROR: Failed to update proxy_servers set; previous entries were preserved"
+        return 1
     fi
 }
 
@@ -3944,6 +3982,13 @@ update_fakeip_whitelist_sets() {
     msg "Updating fakeip whitelist IP-CIDR sets..."
     [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="whitelist-$$"
     set_list_progress "building"
+    if ! hash nft 2>/dev/null; then
+        ASCLASH_FAKEIP_STATE="error"
+        ASCLASH_GROUPED_STATE="error"
+        set_list_progress "failed"
+        warn "Fake-IP firewall sets require nftables/firewall4"
+        return 1
+    fi
     load_all_settings_once
 
     local fake_ip_config fake_ip_range fake_ip_filter_mode
@@ -3969,10 +4014,6 @@ update_fakeip_whitelist_sets() {
         if hash nft 2>/dev/null && nft list set inet clash fakeip_whitelist >/dev/null 2>&1; then
             nft flush set inet clash fakeip_whitelist 2>/dev/null
             msg "nft fakeip_whitelist set cleared"
-        fi
-        if hash ipset 2>/dev/null && ipset list "$FAKEIP_IPSET_NAME" >/dev/null 2>&1; then
-            ipset flush "$FAKEIP_IPSET_NAME" 2>/dev/null
-            msg "ipset $FAKEIP_IPSET_NAME cleared"
         fi
         return 0
     fi
@@ -4077,22 +4118,8 @@ update_fakeip_whitelist_sets() {
             set_list_progress "failed"
             return 1
         fi
-    elif hash iptables 2>/dev/null; then
-        if hash ipset 2>/dev/null; then
-            if ! ensure_fakeip_ipset || ! populate_fakeip_ipset_from_file \
-               || ! printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"; then
-                ASCLASH_FAKEIP_STATE="error"
-                set_list_progress "failed"
-                return 1
-            fi
-        else
-            msg "ERROR: ipset not available for iptables fakeip whitelist update"
-            ASCLASH_FAKEIP_STATE="error"
-            set_list_progress "failed"
-            return 1
-        fi
     else
-        msg "ERROR: Neither nftables nor iptables found"
+        msg "ERROR: nftables fakeip set is unavailable"
         ASCLASH_FAKEIP_STATE="error"
         set_list_progress "failed"
         return 1
@@ -4253,7 +4280,7 @@ restore_bridge_nf_call() {
 # SECTION: Entry points — start / stop / restart / update / update-ip-whitelist
 # =============================================================================
 
-start() {
+start_unlocked() {
     msg "Starting Clash rules script"
     [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="start-$$"
     set_list_progress "building"
@@ -4272,8 +4299,8 @@ start() {
     load_all_settings_once
     preflight_check_tun_stack
 
-    if [ "$FORCE_DNS_REDIRECT" = "true" ] && ! hash nft 2>/dev/null; then
-        warn "Forced client DNS redirect requires nftables; refusing to start with the iptables backend"
+    if ! hash nft 2>/dev/null; then
+        warn "ASClash requires nftables/firewall4; iptables backend is no longer supported"
         set_list_progress "failed"
         return 1
     fi
@@ -4353,38 +4380,17 @@ start() {
     fi
 
     set_list_progress "applying"
-    if hash nft 2>/dev/null; then
-        msg "Using nftables for traffic redirection"
-        if apply_nft_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
-            setup_routing_rules || {
-                warn "Policy-routing setup failed; rolling back nftables rules"
-                teardown_routing_rules
-                rollback_nft_rules ""
-                set_list_progress "failed"
-                return 1
-            }
-        else
-            msg "ERROR: Failed to apply nftables rules"
+    msg "Using nftables for traffic redirection"
+    if apply_nft_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
+        setup_routing_rules || {
+            warn "Policy-routing setup failed; rolling back nftables rules"
+            teardown_routing_rules
+            rollback_nft_rules ""
             set_list_progress "failed"
             return 1
-        fi
-    elif hash iptables 2>/dev/null; then
-        msg "Using iptables for traffic redirection"
-        if apply_iptables_rules "$server_ips" "$fake_ip_range" "$fake_ip_filter_mode"; then
-            setup_routing_rules || {
-                warn "Policy-routing setup failed; rolling back iptables rules"
-                teardown_routing_rules
-                rollback_iptables_rules ""
-                set_list_progress "failed"
-                return 1
-            }
-        else
-            msg "ERROR: Failed to apply iptables rules"
-            set_list_progress "failed"
-            return 1
-        fi
+        }
     else
-        msg "ERROR: Neither nftables nor iptables found"
+        msg "ERROR: Failed to apply nftables rules"
         set_list_progress "failed"
         return 1
     fi
@@ -4420,7 +4426,7 @@ UCI_EOF
     esac
 }
 
-stop() {
+stop_unlocked() {
     msg "Stopping Clash rules script"
 
     load_all_settings_once
@@ -4431,6 +4437,7 @@ stop() {
         teardown_routing_rules
         msg "nftables rules removed successfully"
     elif hash iptables 2>/dev/null; then
+        # Compatibility cleanup only: never create new iptables rules.
         teardown_iptables_tun_forward_rules
         # Always attempt to remove QUIC rules unconditionally: if the setting was
         # changed from "true" to "false" before restart, a conditional removal based
@@ -4448,7 +4455,7 @@ stop() {
         teardown_routing_rules
         msg "iptables rules removed successfully"
     else
-        msg "ERROR: Neither nftables nor iptables found"
+        msg "ERROR: nftables/firewall4 is unavailable"
         return 1
     fi
 
@@ -4464,6 +4471,23 @@ stop() {
     rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
 
     msg "Clash rules script stopped successfully (all routing rules cleaned up)"
+}
+
+start() {
+    with_operation_lock start_unlocked
+}
+
+stop() {
+    with_operation_lock stop_unlocked
+}
+
+restart_unlocked() {
+    stop_unlocked || return 1
+    start_unlocked
+}
+
+restart() {
+    with_operation_lock restart_unlocked
 }
 
 finalize_grouped_list_diagnostics() {
@@ -4501,6 +4525,7 @@ finalize_grouped_list_diagnostics() {
 run_update_cycle() {
     local trigger="$1" readiness="$2" old_grouped_digest new_grouped_digest update_rc
     acquire_update_lock || return 0
+    ASCLASH_OPERATION_LOCK_HELD="true"
     ASCLASH_PROGRESS_ID="${trigger}-$$"
     ASCLASH_LIST_CYCLE_ACTIVE="true"
     begin_list_diagnostics "checking" "update-$$" "$trigger"
@@ -4543,6 +4568,7 @@ run_update_cycle() {
     fi
     write_list_diagnostics || warn "Could not save the last rule-list diagnostics report"
     ASCLASH_LIST_CYCLE_ACTIVE="false"
+    ASCLASH_OPERATION_LOCK_HELD="false"
     release_update_lock
     return "$update_rc"
 }
@@ -4555,8 +4581,7 @@ case "$1" in
         stop
         ;;
     restart)
-        stop
-        start
+        restart
         ;;
     update)
         run_update_cycle "update" "ready"
@@ -4569,7 +4594,12 @@ case "$1" in
         exit $?
         ;;
     update-ip-whitelist)
+        hash nft 2>/dev/null || {
+            warn "Cannot update Fake-IP firewall sets without nftables/firewall4"
+            exit 1
+        }
         acquire_update_lock || exit 0
+        ASCLASH_OPERATION_LOCK_HELD="true"
         ASCLASH_PROGRESS_ID="whitelist-$$"
         ASCLASH_LIST_CYCLE_ACTIVE="true"
         begin_list_diagnostics "checking" "whitelist-$$" "whitelist-update"
@@ -4588,6 +4618,7 @@ case "$1" in
         case "$ASCLASH_LIST_CYCLE_TIME" in ''|*[!0-9]*) ASCLASH_LIST_CYCLE_TIME=0 ;; esac
         write_list_diagnostics || warn "Could not save the last rule-list diagnostics report"
         ASCLASH_LIST_CYCLE_ACTIVE="false"
+        ASCLASH_OPERATION_LOCK_HELD="false"
         release_update_lock
         exit "$update_rc"
         ;;

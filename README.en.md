@@ -27,7 +27,7 @@ See [Traffic processing and IP-CIDR lists](#traffic-processing-and-ip-cidr-lists
 
 ## Requirements and compatibility
 
-- OpenWrt **22.03 or newer** with **firewall4/nftables**. CI packages are built using OpenWrt 24.10 and 25.12 SDKs.
+- OpenWrt **22.03 or newer**, using **firewall4/nftables only**. Iptables-only systems are unsupported. CI packages are built using OpenWrt 24.10 and 25.12 SDKs.
 - **IPv4 only**; ASClash does not configure IPv6 routing.
 - TPROXY requires `kmod-nft-tproxy`; TUN requires `kmod-tun`. The automatic installer installs the required packages.
 - The LuCI package is architecture-independent, but the Mihomo binary must match the router architecture.

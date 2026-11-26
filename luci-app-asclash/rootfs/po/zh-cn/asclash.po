@@ -584,6 +584,21 @@ msgstr "无法打开控制面板：%s"
 msgid "Configuration saved successfully."
 msgstr "配置已成功保存。"
 
+msgid "Validated configuration could not be saved: %s"
+msgstr "已验证的配置无法保存：%s"
+
+msgid "Updated Clash configuration failed validation; settings were not saved."
+msgstr "修改后的 Clash 配置未通过验证；设置未保存。"
+
+msgid "The previous configuration was restored on disk."
+msgstr "已在磁盘上恢复之前的配置。"
+
+msgid "Configuration was loaded into Mihomo, but could not be saved to disk: %s"
+msgstr "配置已加载到 Mihomo，但无法保存到磁盘：%s"
+
+msgid "The previous configuration could not be restored: %s"
+msgstr "无法恢复之前的配置：%s"
+
 msgid "Configuration test failed — service not reloaded. Please fix the errors below:"
 msgstr "配置测试失败，服务未重载。请修复以下错误："
 
@@ -1362,8 +1377,8 @@ msgstr "Mihomo API 返回了意外的连接列表响应。"
 msgid "TPROXY test: sampling active LAN TCP traffic, pass %d of %d…"
 msgstr "TPROXY 测试：正在采样 LAN TCP 活动流量，第 %d/%d 轮……"
 
-msgid "TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data."
-msgstr "已确认 TPROXY：活动 LAN TCP 连接出现在 Mihomo 中并传输了数据。"
+msgid "TPROXY confirmed: an active LAN TCP connection arrived through Mihomo’s TPROXY inbound and transferred data."
+msgstr "已确认 TPROXY：活动 LAN TCP 连接经 Mihomo 的 TPROXY 入站接收并传输了数据。"
 
 msgid "Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect."
 msgstr "可能存在 TPROXY 接收问题：TPROXY 计数器增长时，有 %d 个重传 LAN 流未出现在 Mihomo 中。这只是警告，并不能证明内核存在缺陷。"
@@ -1376,6 +1391,9 @@ msgstr "结论不确定：无法关联到活动的代理 LAN TCP 流。请访问
 
 msgid "Mihomo TCP traffic increased, but no growing connection was identified as coming from a processed LAN interface."
 msgstr "Mihomo 的 TCP 流量有所增加，但无法确认增长的连接来自正在处理的 LAN 接口。"
+
+msgid "Mihomo showed active TCP connections, but none was identified as a TPROXY inbound."
+msgstr "Mihomo API 显示有活动 TCP 连接，但没有连接被识别为通过 TPROXY 入站。"
 
 msgid "No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic."
 msgstr "测试期间 Mihomo API 未显示活动 TCP 连接。这并不排除存在 UDP/QUIC 流量。"

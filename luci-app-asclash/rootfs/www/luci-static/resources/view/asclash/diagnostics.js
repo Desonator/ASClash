@@ -222,11 +222,13 @@ function parseMihomoConnections(result) {
 			const destinationIP = String(metadata.destinationIP || '').replace(/^::ffff:/i, '');
 			const sourcePort = String(metadata.sourcePort || '');
 			const destinationPort = String(metadata.destinationPort || '');
+			const inboundType = String(metadata.type || '').trim().toLowerCase();
 			if (!sourceIP || !destinationIP || !sourcePort || !destinationPort) continue;
 			const key = `${sourceIP}:${sourcePort}>${destinationIP}:${destinationPort}`;
 			flows.set(key, {
 				key,
 				source: sourceIP,
+				inboundType,
 				bytes: (Number(connection.upload) || 0) + (Number(connection.download) || 0)
 			});
 		}
@@ -255,6 +257,7 @@ async function runTproxyProbe(settings, updateStatus) {
 	const suspectCounts = new Map();
 	let observedCandidates = 0;
 	let observedApiTcpFlows = 0;
+	let observedApiTproxyFlows = 0;
 	let observedApiByteGrowth = 0;
 	let conntrackUnavailable = false;
 	const sourceInterfaceCache = new Map();
@@ -283,13 +286,14 @@ async function runTproxyProbe(settings, updateStatus) {
 		if (apiAfter.error) return updateStatus(apiAfter.error, 'error');
 		const conntrackAfter = conntrackTcpFlows(conntrackAfterResult.output);
 		observedApiTcpFlows = Math.max(observedApiTcpFlows, apiAfter.flows.size);
+		let growingLanTproxyFlow = false;
 		for (const [key, after] of apiAfter.flows) {
+			if (after.inboundType === 'tproxy') observedApiTproxyFlows++;
+			if (after.inboundType !== 'tproxy') continue;
 			const before = apiBefore.flows.get(key);
 			if (!before || after.bytes <= before.bytes) continue;
 			observedApiByteGrowth++;
-			if (await isLanSource(after.source)) {
-				return updateStatus(_('TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data.'), 'ok');
-			}
+			if (await isLanSource(after.source)) growingLanTproxyFlow = true;
 		}
 
 		const movingUnreplied = [];
@@ -303,6 +307,8 @@ async function runTproxyProbe(settings, updateStatus) {
 		const tproxyDelta = nftAfter.ok && nftBefore.ok
 			? nftPacketCount(nftAfter.output) - nftPacketCount(nftBefore.output)
 			: 0;
+		if (growingLanTproxyFlow && tproxyDelta > 0)
+			return updateStatus(_('TPROXY confirmed: an active LAN TCP connection arrived through Mihomo’s TPROXY inbound and transferred data.'), 'ok');
 		if (tproxyDelta > 0) {
 			for (const key of movingUnreplied)
 				suspectCounts.set(key, (suspectCounts.get(key) || 0) + 1);
@@ -320,6 +326,8 @@ async function runTproxyProbe(settings, updateStatus) {
 		return updateStatus(_('Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow.'), 'warning');
 	if (observedApiByteGrowth)
 		return updateStatus(_('Mihomo TCP traffic increased, but no growing connection was identified as coming from a processed LAN interface.'), 'warning');
+	if (observedApiTcpFlows && !observedApiTproxyFlows)
+		return updateStatus(_('Mihomo showed active TCP connections, but none was identified as a TPROXY inbound.'), 'warning');
 	if (!observedApiTcpFlows)
 		return updateStatus(_('No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic.'), 'unknown');
 	return updateStatus(_('Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again.'), 'unknown');
