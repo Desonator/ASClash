@@ -1552,15 +1552,13 @@ function createAdditionalSettings(blockQuic, forceDnsRedirect, useTmpfsRules, sh
             _('When enabled, blocks QUIC traffic on UDP port 443. This can improve proxy effectiveness for some services like YouTube.'))
     ]);
 
-    settingsContainer.appendChild(blockQuicLabel);
-
     const forceDnsCheckbox = E('input', {
         'type': 'checkbox',
         'id': 'force_dns_redirect'
     });
     const forceDnsLabel = E('label', {
         'for': 'force_dns_redirect',
-        'style': cardStyle
+        'style': cardStyle + ' grid-column: 1 / -1;'
     }, [
         E('span', { 'style': cardHeaderStyle }, [
             forceDnsCheckbox,
@@ -1570,6 +1568,7 @@ function createAdditionalSettings(blockQuic, forceDnsRedirect, useTmpfsRules, sh
             _('Redirects client DNS from ASClash-processed interfaces to the router resolver (dnsmasq must listen on port 53). Router-originated requests, WAN ingress and excluded interfaces are not intercepted. In Explicit mode with Fake-IP whitelist/rule, SRC-IP-CIDR DIRECT sources are exempt from this redirect. Devices already using router DNS via DHCP still use dnsmasq shared upstream; per-client DNS upstreams are not configured. New port-53 flows take precedence over later firewall redirects. DoT/DoH are not blocked.'))
     ]);
     settingsContainer.appendChild(forceDnsLabel);
+    settingsContainer.appendChild(blockQuicLabel);
 
     const tmpfsCheckbox = E('input', {
         'type': 'checkbox',
