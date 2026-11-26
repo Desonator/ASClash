@@ -623,9 +623,7 @@ return view.extend({
 		].filter(Boolean)));
 
 		const tproxyTestAvailable = proxyMode === 'tproxy' || proxyMode === 'mixed';
-		const tproxyTestMessage = E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, tproxyTestAvailable
-			? _('The test samples Mihomo TCP connections and conntrack for three 2.5-second intervals. It does not create traffic or change firewall rules; UDP/QUIC is not tested.')
-			: _('This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode.'));
+		const tproxyTestMessage = E('p', { 'class': 'cbi-section-descr', 'style': 'margin:6px 0 0;min-height:0;' }, '');
 		const tproxyTestButton = E('button', {
 			'class': 'btn',
 			'click': async function() {
@@ -644,7 +642,17 @@ return view.extend({
 			}
 		}, _('Test TPROXY reception'));
 		tproxyTestButton.disabled = !tproxyTestAvailable;
-		const tproxyTestCard = card(_('TPROXY reception test'), E('div', {}, [tproxyTestButton, tproxyTestMessage]));
+		const tproxyTestHeader = E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;' }, [
+			E('h3', { 'style': 'margin:0;text-align:left;font-size:16px;line-height:20px;font-weight:600;' }, _('TPROXY reception test')),
+			tproxyTestButton
+		]);
+		const tproxyTestCard = E('section', { 'class': 'cbi-section', 'style': 'margin:10px 0;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:6px;text-align:left;min-height:0;box-sizing:border-box;' }, [
+			tproxyTestHeader,
+			E('p', { 'class': 'cbi-section-descr', 'style': 'margin:0;' }, tproxyTestAvailable
+				? _('This check helps verify that Mihomo accepts client TCP traffic redirected through TPROXY, including on kernels or firmware with possible transparent-proxy compatibility issues. It observes current connections only; it does not generate traffic or change firewall rules, and it does not test UDP/QUIC.')
+				: _('This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode.')),
+			tproxyTestMessage
+		]);
 
 		const warningContent = warnings.length
 			? E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;' }, warnings.join('\n'))

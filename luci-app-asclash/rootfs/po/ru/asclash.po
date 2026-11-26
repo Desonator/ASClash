@@ -1414,8 +1414,8 @@ msgstr "Объём TCP-трафика Mihomo вырос, но ни одно ра
 msgid "No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic."
 msgstr "За время проверки API Mihomo не показал активных TCP-соединений. Это не исключает передачу трафика по UDP/QUIC."
 
-msgid "The test samples Mihomo TCP connections and conntrack for three 2.5-second intervals. It does not create traffic or change firewall rules; UDP/QUIC is not tested."
-msgstr "Тест проверяет TCP-соединения Mihomo и conntrack в течение трёх интервалов по 2,5 секунды. Он не создаёт трафик и не меняет правила firewall; UDP/QUIC не проверяется."
+msgid "This check helps verify that Mihomo accepts client TCP traffic redirected through TPROXY, including on kernels or firmware with possible transparent-proxy compatibility issues. It observes current connections only; it does not generate traffic or change firewall rules, and it does not test UDP/QUIC."
+msgstr "Проверка помогает убедиться, что Mihomo принимает клиентский TCP-трафик, перенаправленный через TPROXY, в том числе на ядрах и прошивках с возможными проблемами совместимости прозрачного прокси. Она только наблюдает за текущими соединениями: не создаёт трафик, не меняет правила firewall и не проверяет UDP/QUIC."
 
 msgid "This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode."
 msgstr "Тест проверяет приём TCP через TPROXY и доступен только в режимах TPROXY и MIXED."
