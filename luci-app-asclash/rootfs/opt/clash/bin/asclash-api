@@ -10,7 +10,7 @@ yaml_scalar() {
 	scalar=$(awk -v wanted="$1" '
 	function trim(value) {
 		sub(/^[ \t]+/, "", value)
-		sub(/[ \t]+$/, "", value)
+		sub(/[ \t\r]+$/, "", value)
 		return value
 	}
 	function decode_quoted(value, quote, result, i, ch, escaped_char) {
@@ -128,3 +128,5 @@ max_time=4
 curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
 	--config "$auth_config" --write-out '\n%{http_code}' \
 	"$protocol://$address/$endpoint"
+curl_status=$?
+[ "$curl_status" -eq 0 ] || exit 10
