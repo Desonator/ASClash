@@ -7,7 +7,7 @@
 CONFIG_FILE="/opt/clash/config.yaml"
 
 yaml_scalar() {
-	awk -v wanted="$1" '
+	scalar=$(awk -v wanted="$1" '
 	function trim(value) {
 		sub(/^[ \t]+/, "", value)
 		sub(/[ \t]+$/, "", value)
@@ -48,7 +48,17 @@ yaml_scalar() {
 		print trim(value)
 		exit
 	}
-	' "$CONFIG_FILE"
+	' "$CONFIG_FILE" 2>/dev/null)
+	if [ -n "$scalar" ]; then
+		printf '%s\n' "$scalar"
+		return 0
+	fi
+
+	# Keep a simple fallback for minimal BusyBox awk builds that reject one of
+	# the YAML scalar escape forms above. The keys are fixed internal callers.
+	line=$(grep -m1 -E "^[[:space:]]*$1[[:space:]]*:" "$CONFIG_FILE" 2>/dev/null) || return 0
+	scalar=$(printf '%s\n' "$line" | sed -E "s/^[[:space:]]*$1[[:space:]]*:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^['\"]//; s/['\"][[:space:]]*$//" | tr -d '\r')
+	printf '%s\n' "$scalar"
 }
 
 case "${1:-}" in
