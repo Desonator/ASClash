@@ -232,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.40';
+const ASCLASH_VERSION = '4.8.2.41';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -374,35 +374,9 @@ return view.extend({
                 await view_asclash_utils.commitStagedConfig(staged.stagedPath);
                 configCommitted = true;
 
-                const ec = parseYamlValue(value, 'external-controller');
-                const ecTls = parseYamlValue(value, 'external-controller-tls');
-                const secret = parseYamlValue(value, 'secret') || '';
-                const useTls = !!ecTls;
-
-                const { host, port } = normalizeHostPortFromAddr(
-                    useTls ? ecTls : ec,
-                    '127.0.0.1',
-                    useTls ? '9443' : '9090'
-                );
-                const scheme = useTls ? 'https' : 'http';
-
-                // Validate the staged file locally, then reload Mihomo's configured path.
-                // Passing the temporary filename to /configs is rejected by some cores.
-                const curlArgs = [
-                    '-sS', '-w', '\n%{http_code}',
-                    '-X', 'PUT',
-                    '-H', 'Content-Type: application/json',
-                    '-H', 'Authorization: Bearer ' + secret,
-                    '--data', JSON.stringify({ path: '', payload: '' }),
-                    '--connect-timeout', '5',
-                    '--max-time', '15'
-                ];
-                if (useTls) {
-                    curlArgs.push('-k');
-                }
-                curlArgs.push(scheme + '://' + host + ':' + port + '/configs?force=true');
-
-                const res = await fs.exec('curl', curlArgs);
+                // The helper reads the secret from config.yaml into a mode-600
+                // tmpfs curl config and refuses non-loopback controller addresses.
+                const res = await fs.exec('/opt/clash/bin/asclash-api', ['reload-config']);
                 const responseLines = String(res.stdout || '').split(/\r?\n/);
                 const httpCode = (responseLines.pop() || '').trim();
                 const responseBody = responseLines.join('\n').trim();
@@ -417,12 +391,15 @@ return view.extend({
                         rollbackMessage = _('The previous configuration could not be restored: %s').format(rollbackError.message || String(rollbackError));
                     }
                     let detail = [res.stderr, responseBody].filter(Boolean).join('\n').trim();
-                    if (useTls && /Protocol\s+"?https"?\s+not\s+supported/i.test(detail)) {
-                        detail += ' ' + _('(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)');
-                    }
+                    if (res.code === 4)
+                        detail += ' ' + _('The API controller must use a loopback address for safe local reload.');
+                    else if (res.code === 5)
+                        detail += ' ' + _('The configured API secret contains unsupported line breaks.');
+                    else if (res.code === 10 && /Protocol\s+"?https"?\s+not\s+supported/i.test(detail))
+                        detail += ' ' + _('(Hint: the system curl has no HTTPS support. Install curl-ssl.)');
                     ui.addNotification(null, E('p',
-                        _('Config reload failed (%s, HTTP %s). %s %s Try "Save & Restart core" for a full restart.')
-                        .format(scheme, httpCode || 'n/a', detail, rollbackMessage)
+                        _('Config reload failed (HTTP %s). %s %s Try "Save & Restart core" for a full restart.')
+                        .format(httpCode || 'n/a', detail, rollbackMessage)
                     ), 'error');
                     return;
                 }

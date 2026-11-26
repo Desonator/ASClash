@@ -348,7 +348,6 @@ restore_dns() {
 	if [ -f "$DNS_BACKUP_FILE" ]; then
 		orig_cachesize=$(grep '^CACHESIZE=' "$DNS_BACKUP_FILE" | cut -d= -f2)
 		orig_noresolv=$(grep '^NORESOLV=' "$DNS_BACKUP_FILE" | cut -d= -f2)
-		rm -f "$DNS_BACKUP_FILE"
 	fi
 
 	if [ -n "$orig_cachesize" ]; then
@@ -363,11 +362,35 @@ restore_dns() {
 		uci delete dhcp.@dnsmasq[0].noresolv 2>/dev/null
 	fi
 
-	if uci commit dhcp; then
-		msg "DNS settings restored"
-	else
+	if ! uci commit dhcp; then
 		msg "WARNING: Failed to restore DNS settings"
+		return 1
 	fi
+
+	# Keep the ownership backup until the committed values can be read back.
+	# If commit or restoration was incomplete, the next stop/start can retry
+	# rather than losing the only record of the user's original dnsmasq state.
+	local restored_cachesize restored_noresolv restored_servers
+	restored_cachesize=$(uci get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
+	restored_noresolv=$(uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null)
+	restored_servers=$(uci get dhcp.@dnsmasq[0].server 2>/dev/null)
+	if [ "$restored_cachesize" != "$orig_cachesize" ] || [ "$restored_noresolv" != "$orig_noresolv" ]; then
+		msg "WARNING: dnsmasq options did not match their saved values after restore; backup retained"
+		return 1
+	fi
+	if [ "$dns_server_owned" = "1" ] && [ -n "$dns_server" ] && printf '%s\n' "$restored_servers" | grep -F -x -q "$dns_server"; then
+		msg "WARNING: ASClash DNS upstream is still present after restore; backup retained"
+		return 1
+	fi
+	if [ "$legacy_dns_server_owned" = "1" ] && printf '%s\n' "$restored_servers" | grep -F -x -q "$legacy_dns_server"; then
+		msg "WARNING: Legacy ASClash DNS upstream is still present after restore; backup retained"
+		return 1
+	fi
+	if ! rm -f "$DNS_BACKUP_FILE"; then
+		msg "WARNING: DNS settings were restored, but the ownership backup could not be removed"
+		return 1
+	fi
+	msg "DNS settings restored"
 }
 
 # Function to apply firewall rules

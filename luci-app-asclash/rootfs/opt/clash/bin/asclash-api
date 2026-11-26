@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Read-only local Mihomo API client for LuCI diagnostics.
+# Local Mihomo API client for LuCI diagnostics and configuration reload.
 # Reads the API secret inside this helper and stores its curl config in a
 # private tmpfs file, so the secret never appears in argv, output, or logs.
 
@@ -64,6 +64,7 @@ yaml_scalar() {
 case "${1:-}" in
 	version) endpoint="version" ;;
 	connections) endpoint="connections" ;;
+	reload-config) endpoint="configs" ;;
 	conntrack)
 		[ -r /proc/net/nf_conntrack ] || exit 6
 		awk '/^ipv4 2 tcp / && (/ESTABLISHED/ || /SYN_SENT/ || /TIME_WAIT/) { print; n++; if (n >= 1024) exit }' /proc/net/nf_conntrack
@@ -78,12 +79,12 @@ controller=$(yaml_scalar external-controller)
 tls_controller=$(yaml_scalar external-controller-tls)
 secret=$(yaml_scalar secret)
 
-if [ -n "$controller" ]; then
-	protocol="http"
-	address="$controller"
-else
+if [ -n "$tls_controller" ]; then
 	protocol="https"
 	address="$tls_controller"
+else
+	protocol="http"
+	address="$controller"
 fi
 [ -n "$address" ] || exit 3
 
@@ -125,8 +126,18 @@ fi
 
 max_time=4
 [ "$endpoint" = "connections" ] && max_time=2
-curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
-	--config "$auth_config" --write-out '\n%{http_code}' \
-	"$protocol://$address/$endpoint"
+tls_option=""
+[ "$protocol" = "https" ] && tls_option="-k"
+if [ "$endpoint" = "configs" ]; then
+	max_time=15
+	curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
+		$tls_option --config "$auth_config" -X PUT -H 'Content-Type: application/json' \
+		--data '{"path":"","payload":""}' --write-out '\n%{http_code}' \
+		"$protocol://$address/configs?force=true"
+else
+	curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
+		$tls_option --config "$auth_config" --write-out '\n%{http_code}' \
+		"$protocol://$address/$endpoint"
+fi
 curl_status=$?
 [ "$curl_status" -eq 0 ] || exit 10

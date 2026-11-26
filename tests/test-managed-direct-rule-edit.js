@@ -53,6 +53,12 @@ catch (e) { rejectedUnsafeOrder = /Move all REJECT/.test(e.message); }
 if (!rejectedUnsafeOrder)
 	throw new Error('A later REJECT rule was not protected from being shadowed');
 
+let rejectedNonRuleMode = false;
+try { helpers.applyManagedDirectRules(['mode: global', 'rules:', '  - MATCH,Proxy', ''].join('\n'), ['192.168.1.110']); }
+catch (e) { rejectedNonRuleMode = /mode: rule/.test(e.message); }
+if (!rejectedNonRuleMode)
+	throw new Error('A non-rule Mihomo mode was allowed to accept a managed DIRECT selection');
+
 (async () => {
 	const devices = await helpers.getPermanentDhcpDevices();
 	if (devices.length !== 1 || devices[0].ip !== '192.168.1.110')

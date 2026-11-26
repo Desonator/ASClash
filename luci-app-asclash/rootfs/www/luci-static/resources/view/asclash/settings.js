@@ -588,6 +588,13 @@ function applyManagedDirectRules(config, selectedIPs) {
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (!ips.length) return lines.join('\n');
 
+    const modeLine = lines.find(line => /^mode\s*:/.test(line));
+    const configuredMode = modeLine
+        ? modeLine.replace(/^mode\s*:\s*/, '').replace(/\s+#.*$/, '').trim().replace(/^['"]|['"]$/g, '').toLowerCase()
+        : 'rule';
+    if (configuredMode !== 'rule')
+        throw new Error(_('Per-device DIRECT requires Mihomo mode: rule; global/direct mode does not apply rules.'));
+
     const rulesIndex = lines.findIndex(line => /^rules:\s*(?:#.*)?$/.test(line));
     if (rulesIndex === -1) {
         if (lines.some(line => /^rules\s*:/.test(line)))

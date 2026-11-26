@@ -1456,6 +1456,9 @@ msgstr "Результат не определён: ядро не предост
 msgid "Direct routing for reserved DHCP devices"
 msgstr "Прямой выход устройств с постоянной DHCP-арендой"
 
+msgid "Per-device DIRECT requires Mihomo mode: rule; global/direct mode does not apply rules."
+msgstr "Для DIRECT по устройствам требуется режим Mihomo mode: rule; в режимах global/direct правила не применяются."
+
 msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
 msgstr "Для выбранных устройств создаётся управляемое правило SRC-IP-CIDR,DIRECT после начальных правил REJECT. Их трафик на обрабатываемых ASClash интерфейсах сначала проходит через Mihomo, сохраняя сопоставление Fake-IP с доменом, а затем выходит напрямую. В списке только постоянные IPv4 DHCP-резервации. Блокировка QUIC продолжает действовать."
 

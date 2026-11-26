@@ -1422,6 +1422,9 @@ msgstr "结论不确定：此内核未提供识别无响应 LAN 流所需的 con
 msgid "Direct routing for reserved DHCP devices"
 msgstr "为固定 DHCP 租约设备直连"
 
+msgid "Per-device DIRECT requires Mihomo mode: rule; global/direct mode does not apply rules."
+msgstr "按设备 DIRECT 需要 Mihomo mode: rule；global/direct 模式不会应用规则。"
+
 msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
 msgstr "所选设备将在开头的 REJECT 规则之后添加受 ASClash 管理的 SRC-IP-CIDR,DIRECT 规则。设备流量先经过 Mihomo，以保留 Fake-IP 域名映射，然后通过 DIRECT 出站。列表仅显示永久 IPv4 DHCP 保留租约。QUIC 阻止仍然生效。"
 
