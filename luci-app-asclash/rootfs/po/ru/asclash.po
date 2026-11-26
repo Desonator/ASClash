@@ -715,8 +715,8 @@ msgstr "Полный перезапуск: останавливает и зап�
 msgid "Service is not running — config reload requires a running Mihomo instance. Use \"Save & Restart core\" instead."
 msgstr "Служба не запущена — для перезагрузки конфига нужен работающий Mihomo. Используйте «Сохранить и перезапустить ядро»."
 
-msgid "Config reload failed (%s, HTTP %s). %s Try \"Save & Restart core\" for a full restart."
-msgstr "Перезагрузка конфига не удалась (%s, HTTP %s). %s Попробуйте «Сохранить и перезапустить ядро» для полного перезапуска."
+msgid "Config reload failed (%s, HTTP %s). %s %s Try \"Save & Restart core\" for a full restart."
+msgstr "Перезагрузка конфига не удалась (%s, HTTP %s). %s %s Попробуйте «Сохранить и перезапустить ядро» для полного перезапуска."
 
 msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)"
 msgstr "(Подсказка: системный curl не поддерживает HTTPS. Установите пакет curl-ssl или используйте обычный external-controller для перезагрузки конфига.)"

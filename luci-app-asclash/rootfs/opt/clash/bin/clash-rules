@@ -23,8 +23,7 @@ readonly FAKEIP_WHITELIST_FILE="/opt/clash/lst/fakeip-whitelist-ipcidr.txt"
 readonly FAKEIP_WHITELIST_SUMMARY_FILE="/opt/clash/lst/fakeip-whitelist-summary.txt"
 readonly GROUPED_FAKEIP_SUMMARY_FILE="/opt/clash/lst/fakeip-port-summary.txt"
 readonly GROUPED_FAKEIP_DIAGNOSTICS_FILE="/tmp/clash/fakeip_port_parser_diagnostics.txt"
-readonly FAKEIP_IPSET_NAME="clash_fakeip_whitelist"
-# RAM-only: last CIDR list digest applied to nft/ipset (skip kernel churn when unchanged).
+# RAM-only: last CIDR list digest applied to nftables (skip kernel churn when unchanged).
 readonly FAKEIP_WHITELIST_DIGEST_FILE="/tmp/clash/fakeip_whitelist_applied.digest"
 
 # Global Settings Variables
@@ -86,11 +85,9 @@ FAKEIP_REFRESH_ISSUES=""
 readonly FAKEIP_AUTO_BEGIN="# AUTO-BEGIN: generated from rule-providers — do not edit between markers"
 readonly FAKEIP_AUTO_END="# AUTO-END"
 
-# During firewall/policy setup, remember failures even when an individual
-# helper runs in a pipeline subshell or historically ignored a command status.
+# During nftables setup, remember failures even when an individual helper runs
+# in a pipeline subshell or historically ignored a command status.
 NFT_FAILURE_TRACKER=""
-IPTABLES_FAILURE_TRACKER=""
-IPSET_FAILURE_TRACKER=""
 nft() {
     command nft "$@"
     local rc=$?
@@ -102,26 +99,8 @@ nft() {
     return "$rc"
 }
 
-iptables() {
+legacy_iptables() {
     command iptables "$@"
-    local rc=$?
-    if [ "$rc" -ne 0 ] && [ -n "$IPTABLES_FAILURE_TRACKER" ]; then
-        case " $* " in
-            *" -N "*|*" -A "*|*" -I "*|*" -F "*|*" -X "*|*" -D "*) : > "$IPTABLES_FAILURE_TRACKER" ;;
-        esac
-    fi
-    return "$rc"
-}
-
-ipset() {
-    command ipset "$@"
-    local rc=$?
-    if [ "$rc" -ne 0 ] && [ -n "$IPSET_FAILURE_TRACKER" ]; then
-        case "$1" in
-            create|flush|add|restore) : > "$IPSET_FAILURE_TRACKER" ;;
-        esac
-    fi
-    return "$rc"
 }
 
 # Helper: returns 0 if the current fake-ip-filter-mode is one of the modes that
@@ -467,31 +446,6 @@ read_fakeip_whitelist_entries() {
         print $0
     }
     ' "$FAKEIP_WHITELIST_FILE"
-}
-
-# Create the fakeip whitelist ipset if it does not exist, then flush it ready for population.
-ensure_fakeip_ipset() {
-    if ! ipset list "$FAKEIP_IPSET_NAME" >/dev/null 2>&1; then
-        ipset create "$FAKEIP_IPSET_NAME" hash:net maxelem 65536 2>/dev/null || {
-            msg "ERROR: Failed to create ipset $FAKEIP_IPSET_NAME"
-            return 1
-        }
-        msg "Created ipset: $FAKEIP_IPSET_NAME"
-    else
-        ipset flush "$FAKEIP_IPSET_NAME"
-    fi
-}
-
-# Populate the fakeip whitelist ipset from FAKEIP_WHITELIST_IPS (already loaded into memory).
-populate_fakeip_ipset_from_file() {
-    if [ -z "$FAKEIP_WHITELIST_IPS" ]; then
-        msg "Fakeip whitelist is empty, ipset $FAKEIP_IPSET_NAME left empty"
-        return 0
-    fi
-    echo "$FAKEIP_WHITELIST_IPS" | while IFS= read -r cidr; do
-        [ -n "$cidr" ] && ipset add "$FAKEIP_IPSET_NAME" "$cidr" 2>/dev/null
-    done
-    msg "Populated ipset $FAKEIP_IPSET_NAME with $(echo "$FAKEIP_WHITELIST_IPS" | wc -l | xargs) entries"
 }
 
 # Return success if a default route exists (cheap, no fork) — the reliable
@@ -3020,335 +2974,12 @@ apply_nft_output_rules() {
     msg "Output chain rules applied"
 }
 
-# For iptables - apply explicit interface rules
-apply_iptables_explicit_interface_rules() {
-    local included_interfaces
-    included_interfaces=$(get_included_interfaces) || return 1
-    if [ -n "$included_interfaces" ]; then
-        msg "Processing traffic from interfaces: $(echo "$included_interfaces" | tr '\n' ' ')"
-        echo "$included_interfaces" | while IFS= read -r iface; do
-            [ -n "$iface" ] && iptables -t mangle -A CLASH -i "$iface" -j CLASH_PROCESS
-        done
-    else
-        return 1
-    fi
-}
-
-# For iptables - apply exclude interface rules to prevent routing loops
-apply_iptables_exclude_interface_rules() {
-    local excluded_interfaces="$1"
-    if [ -n "$excluded_interfaces" ]; then
-        msg "Excluded interfaces: $(echo "$excluded_interfaces" | tr '\n' ' ')"
-        echo "$excluded_interfaces" | while IFS= read -r iface; do
-            [ -n "$iface" ] && iptables -t mangle -A CLASH -i "$iface" -j RETURN
-        done
-    else
-        msg "No excluded interfaces found"
-    fi
-}
-
-# For iptables - apply DHCP exclusion rules
-apply_iptables_dhcp_rules() {
-    if chain_exists "mangle" "CLASH_PROCESS"; then
-        iptables -t mangle -I CLASH_PROCESS 1 -p udp --sport 67 --dport 68 -j RETURN
-        iptables -t mangle -I CLASH_PROCESS 1 -p udp --sport 68 --dport 67 -j RETURN
-        msg "DHCP traffic excluded from proxy"
-    fi
-}
-
-# For iptables - prevent routing loops with marks
-apply_iptables_loop_prevention() {
-    # Exclude packets already marked by Clash (routing-mark: 2 → 0x0002)
-    iptables -t mangle -A CLASH_PROCESS -m mark --mark "$MARK_CLASH_ROUTING" -j RETURN
-    # Exclude packets with any high-byte mark (e.g. connmark restored by other tools)
-    iptables -t mangle -A CLASH_PROCESS -m mark --mark 0xff00/0xff00 -j RETURN
-    msg "Loop prevention rules applied"
-}
-
-# For iptables - apply rules for reserved networks
-apply_iptables_reserved_networks() {
-    for network in $RESERVED_NETWORKS; do
-        iptables -t mangle -A CLASH_PROCESS -d "$network" -j RETURN
-    done
-    msg "Reserved networks excluded from proxy (only destination)"
-}
-
-# For iptables - block QUIC traffic
-apply_iptables_quic_blocking() {
-    if [ "$BLOCK_QUIC" = "true" ]; then
-        iptables -t filter -I INPUT -p udp --dport 443 -j REJECT 2>/dev/null
-        iptables -t filter -I FORWARD -p udp --dport 443 -j REJECT 2>/dev/null
-        msg "QUIC traffic blocked"
-    else
-        msg "QUIC blocking disabled"
-    fi
-}
-
-# For iptables - exclude Clash ports
-apply_iptables_clash_exclusions() {
-    iptables -t mangle -A CLASH_PROCESS -p tcp --dport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_PROCESS -p udp --dport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_PROCESS -p tcp --sport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_PROCESS -p udp --sport 7890:7894 -j RETURN
-    msg "Clash ports excluded from proxy"
-}
-
-# For iptables - exclude proxy server IPs
-apply_iptables_server_exclusions() {
-    local server_ips="$1"
-    if [ -n "$server_ips" ]; then
-        echo "$server_ips" | while IFS= read -r ip; do
-            [ -n "$ip" ] && {
-                iptables -t mangle -A CLASH_PROCESS -d "$ip/32" -j RETURN
-                iptables -t mangle -A CLASH_PROCESS -s "$ip/32" -j RETURN
-            }
-        done
-        msg "Proxy server IPs excluded from proxy"
-    else
-        msg "No proxy server IPs to exclude"
-    fi
-}
-
-# For iptables - apply traffic redirection rules (mode-aware)
-# TPROXY:  TCP+UDP both redirected via TPROXY port 7894
-# MIXED:   TCP → TPROXY mark 0x0001; UDP → mark 0x0003 for routing to clash-tun (table 101)
-# TUN:     TCP+UDP both marked 0x0001 for routing to clash-tun (table 100)
-apply_iptables_tproxy_rules() {
-    local fake_ip_range="$1"
-    local server_ips="$2"
-
-    apply_iptables_src_ip_cidr_policy
-    apply_iptables_src_ip_cidr_rules "$server_ips"
-
-    case "$PROXY_MODE" in
-        "tun")
-            if [ -n "$fake_ip_range" ]; then
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p tcp -j MARK --set-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p udp -j MARK --set-mark "$MARK_TPROXY"
-                msg "TUN mark rules applied for fake-ip range: $fake_ip_range"
-            else
-                iptables -t mangle -A CLASH_PROCESS -p tcp -j MARK --set-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -p udp -j MARK --set-mark "$MARK_TPROXY"
-                msg "TUN mark rules applied for all traffic (via clash-tun)"
-            fi
-            ;;
-        "mixed")
-            if [ -n "$fake_ip_range" ]; then
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p udp -j MARK --set-mark "$MARK_TUN_UDP"
-                msg "MIXED rules applied for fake-ip range: $fake_ip_range (TCP TPROXY, UDP TUN mark 0x0003)"
-            else
-                iptables -t mangle -A CLASH_PROCESS -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -p udp -j MARK --set-mark "$MARK_TUN_UDP"
-                msg "MIXED rules applied for all traffic (TCP TPROXY, UDP TUN mark 0x0003)"
-            fi
-            ;;
-        *)
-            if [ -n "$fake_ip_range" ]; then
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -d "$fake_ip_range" -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                msg "TPROXY rules applied only for fake-ip range: $fake_ip_range"
-            else
-                iptables -t mangle -A CLASH_PROCESS -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                msg "TPROXY rules applied for all traffic"
-            fi
-            ;;
-    esac
-    # Add ipset-based rules for fakeip whitelist IP-CIDR entries (whitelist/rule modes)
-    if is_ipcidr_whitelist_mode && [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-        case "$PROXY_MODE" in
-            "tun")
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p tcp -j MARK --set-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p udp -j MARK --set-mark "$MARK_TPROXY"
-                msg "TUN: fakeip whitelist ipset rules applied"
-                ;;
-            "mixed")
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p udp -j MARK --set-mark "$MARK_TUN_UDP"
-                msg "MIXED: fakeip whitelist ipset rules applied"
-                ;;
-            *)
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -m set --match-set "$FAKEIP_IPSET_NAME" dst -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                msg "TPROXY: fakeip whitelist ipset rules applied"
-                ;;
-        esac
-    fi
-}
-
-# For iptables - mirror simple SRC-IP-CIDR DIRECT/REJECT rules in explicit
-# fake-ip-filter whitelist/rule mode before any source proxy marking is applied.
-apply_iptables_src_ip_cidr_policy() {
-    [ "$MODE" = "explicit" ] || return 0
-    is_ipcidr_whitelist_mode || return 0
-
-    local reject_src_cidrs direct_src_cidrs
-    reject_src_cidrs=$(extract_reject_src_ip_cidrs)
-    direct_src_cidrs=$(extract_direct_src_ip_cidrs)
-
-    if [ -n "$reject_src_cidrs" ]; then
-        echo "$reject_src_cidrs" | while IFS= read -r src; do
-            [ -n "$src" ] && iptables -t mangle -A CLASH_PROCESS -s "$src" -j DROP
-        done
-        msg "SRC-IP-CIDR reject policy applied for: $(echo "$reject_src_cidrs" | tr '\n' ' ')"
-    fi
-
-    if [ -n "$direct_src_cidrs" ]; then
-        echo "$direct_src_cidrs" | while IFS= read -r src; do
-            [ -n "$src" ] && iptables -t mangle -A CLASH_PROCESS -s "$src" -j RETURN
-        done
-        msg "SRC-IP-CIDR direct policy applied for: $(echo "$direct_src_cidrs" | tr '\n' ' ')"
-    fi
-}
-
-# For iptables - in explicit mode with fake-ip-filter-mode whitelist/rule, route
-# source clients mentioned in non-DIRECT SRC-IP-CIDR rules through Clash before
-# the normal fake-ip destination filter. Reserved networks and proxy server IPs
-# are returned first to preserve LAN and upstream access.
-apply_iptables_src_ip_cidr_rules() {
-    local server_ips="$1"
-    [ "$MODE" = "explicit" ] || return 0
-    is_ipcidr_whitelist_mode || return 0
-
-    local src_cidrs
-    src_cidrs=$(extract_proxy_src_ip_cidrs)
-    [ -n "$src_cidrs" ] || return 0
-
-    echo "$src_cidrs" | while IFS= read -r src; do
-        [ -n "$src" ] || continue
-
-        local network ip
-        for network in $RESERVED_NETWORKS; do
-            iptables -t mangle -A CLASH_PROCESS -s "$src" -d "$network" -j RETURN
-        done
-
-        if [ -n "$server_ips" ]; then
-            echo "$server_ips" | while IFS= read -r ip; do
-                [ -n "$ip" ] && iptables -t mangle -A CLASH_PROCESS -s "$src" -d "$ip/32" -j RETURN
-            done
-        fi
-
-        case "$PROXY_MODE" in
-            "tun")
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p tcp -j MARK --set-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p udp -j MARK --set-mark "$MARK_TPROXY"
-                ;;
-            "mixed")
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p udp -j MARK --set-mark "$MARK_TUN_UDP"
-                ;;
-            *)
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                iptables -t mangle -A CLASH_PROCESS -s "$src" -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --tproxy-mark "$MARK_TPROXY"
-                ;;
-        esac
-    done
-
-    msg "SRC-IP-CIDR source marking applied for: $(echo "$src_cidrs" | tr '\n' ' ')"
-}
-
-# For iptables - apply interface exclusion rules in output chain
-apply_iptables_interface_exclusion_output() {
-    local excluded_interfaces="$1"
-    if [ -n "$excluded_interfaces" ]; then
-        msg "Excluded interfaces in output (iptables): $(echo "$excluded_interfaces" | tr '\n' ' ')"
-        echo "$excluded_interfaces" | while IFS= read -r iface; do
-            [ -n "$iface" ] && iptables -t mangle -I CLASH_LOCAL 1 -o "$iface" -j RETURN
-        done
-    fi
-}
-
-# For iptables - apply output chain rules
-apply_iptables_output_rules() {
-    local server_ips="$1"
-    local excluded_interfaces="$2"
-    local fake_ip_filter_mode="$3"
-    local fake_ip_range="$4"
-
-    # Apply interface exclusions for output traffic
-    apply_iptables_interface_exclusion_output "$excluded_interfaces"
-
-    # Exclude already marked packets
-    iptables -t mangle -A CLASH_LOCAL -m mark --mark "$MARK_CLASH_ROUTING" -j RETURN
-    iptables -t mangle -A CLASH_LOCAL -m mark --mark 0xff00/0xff00 -j RETURN
-
-    # Skip exclusion rules in whitelist mode
-    if [ "$fake_ip_filter_mode" != "whitelist" ]; then
-        # Exclude DHCP traffic
-        iptables -t mangle -I CLASH_LOCAL 1 -p udp --sport 67 --dport 68 -j RETURN
-        iptables -t mangle -I CLASH_LOCAL 1 -p udp --sport 68 --dport 67 -j RETURN
-
-        # Apply exclusions for reserved networks
-        for network in $RESERVED_NETWORKS; do
-            iptables -t mangle -A CLASH_LOCAL -d "$network" -j RETURN
-            iptables -t mangle -A CLASH_LOCAL -s "$network" -j RETURN
-        done
-
-        # Apply server exclusions if provided
-        if [ -n "$server_ips" ]; then
-            echo "$server_ips" | while IFS= read -r ip; do
-                [ -n "$ip" ] && {
-                    iptables -t mangle -A CLASH_LOCAL -d "$ip/32" -j RETURN
-                    iptables -t mangle -A CLASH_LOCAL -s "$ip/32" -j RETURN
-                }
-            done
-        fi
-    fi
-
-    # Exclude Clash process and ports
-    iptables -t mangle -A CLASH_LOCAL -p tcp --dport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_LOCAL -p udp --dport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_LOCAL -p tcp --sport 7890:7894 -j RETURN
-    iptables -t mangle -A CLASH_LOCAL -p udp --sport 7890:7894 -j RETURN
-
-    # In MIXED mode router-originated UDP uses TUN mark (0x0003 → table 101 → clash-tun)
-    local ipt_output_udp_mark="$MARK_TPROXY"
-    if [ "$PROXY_MODE" = "mixed" ]; then
-        ipt_output_udp_mark="$MARK_TUN_UDP"
-    fi
-
-    if [ -n "$fake_ip_range" ]; then
-        iptables -t mangle -A CLASH_LOCAL -m mark --mark 0 -p tcp -d "$fake_ip_range" -j MARK --set-mark "$MARK_TPROXY"
-        iptables -t mangle -A CLASH_LOCAL -m mark --mark 0 -p udp -d "$fake_ip_range" -j MARK --set-mark "$ipt_output_udp_mark"
-        msg "OUTPUT: Marking applied only for fake-ip range: $fake_ip_range"
-    else
-        iptables -t mangle -A CLASH_LOCAL -m mark --mark 0 -p tcp -j MARK --set-mark "$MARK_TPROXY"
-        iptables -t mangle -A CLASH_LOCAL -m mark --mark 0 -p udp -j MARK --set-mark "$ipt_output_udp_mark"
-        msg "OUTPUT: Marking applied for all traffic"
-    fi
-    # Additionally mark locally generated traffic to fakeip whitelist IP-CIDR entries
-    # (applies in both whitelist and rule fake-ip-filter-mode values)
-    if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-        iptables -t mangle -A CLASH_LOCAL -m set --match-set "$FAKEIP_IPSET_NAME" dst -p tcp -j MARK --set-mark "$MARK_TPROXY"
-        iptables -t mangle -A CLASH_LOCAL -m set --match-set "$FAKEIP_IPSET_NAME" dst -p udp -j MARK --set-mark "$ipt_output_udp_mark"
-        msg "OUTPUT: fakeip whitelist ipset rules applied"
-    fi
-
-    msg "Output chain rules applied"
-}
-
-# For iptables - allow forwarding to/from clash-tun (TUN/MIXED mode)
-# Inserts accept rules at the top of the filter FORWARD chain so that traffic
-# forwarded between LAN and clash-tun is not dropped by fw3/iptables rules.
-apply_iptables_tun_forward_rules() {
-    case "$PROXY_MODE" in
-        "tun"|"mixed") ;;
-        *) return 0 ;;
-    esac
-
-    iptables -t filter -I INPUT 1 -i clash-tun -j ACCEPT 2>/dev/null
-    iptables -t filter -I FORWARD 1 -i clash-tun -j ACCEPT 2>/dev/null
-    iptables -t filter -I FORWARD 1 -o clash-tun -j ACCEPT 2>/dev/null
-    msg "Inserted clash-tun INPUT+FORWARD rules (iptables, TUN/MIXED mode)"
-}
-
-# For iptables - remove the INPUT+FORWARD rules added by apply_iptables_tun_forward_rules
+# Remove INPUT/FORWARD rules left by pre-nftables ASClash versions.
 teardown_iptables_tun_forward_rules() {
-    iptables -t filter -D INPUT -i clash-tun -j ACCEPT 2>/dev/null
-    iptables -t filter -D FORWARD -i clash-tun -j ACCEPT 2>/dev/null
-    iptables -t filter -D FORWARD -o clash-tun -j ACCEPT 2>/dev/null
-    msg "Removed clash-tun INPUT+FORWARD rules (iptables)"
+    legacy_iptables -t filter -D INPUT -i clash-tun -j ACCEPT 2>/dev/null
+    legacy_iptables -t filter -D FORWARD -i clash-tun -j ACCEPT 2>/dev/null
+    legacy_iptables -t filter -D FORWARD -o clash-tun -j ACCEPT 2>/dev/null
+    msg "Removed legacy clash-tun INPUT+FORWARD rules"
 }
 
 # Roll back an incomplete nftables build. Removing the partially constructed
@@ -3494,114 +3125,6 @@ apply_nft_rules() {
     rm -f "$nft_failure_file"
 
     msg "nftables rules applied successfully"
-}
-
-rollback_iptables_rules() {
-    IPTABLES_FAILURE_TRACKER=""
-    IPSET_FAILURE_TRACKER=""
-    [ -n "$1" ] && rm -f "$1"
-    rm -f "/tmp/clash/ipset_apply_failed.$$"
-    teardown_iptables_tun_forward_rules
-    iptables -t mangle -D PREROUTING -j CLASH 2>/dev/null
-    iptables -t mangle -D OUTPUT -j CLASH_LOCAL 2>/dev/null
-    iptables -t mangle -F CLASH 2>/dev/null
-    iptables -t mangle -X CLASH 2>/dev/null
-    iptables -t mangle -F CLASH_PROCESS 2>/dev/null
-    iptables -t mangle -X CLASH_PROCESS 2>/dev/null
-    iptables -t mangle -F CLASH_LOCAL 2>/dev/null
-    iptables -t mangle -X CLASH_LOCAL 2>/dev/null
-    iptables -t filter -D INPUT -p udp --dport 443 -j REJECT 2>/dev/null
-    iptables -t filter -D FORWARD -p udp --dport 443 -j REJECT 2>/dev/null
-    return 1
-}
-
-# Apply iptables rules dynamically
-apply_iptables_rules() {
-    local server_ips="$1"
-    local fake_ip_range="$2"
-    local fake_ip_filter_mode="$3"
-    local iptables_failure_file="/tmp/clash/iptables_apply_failed.$$"
-    local ipset_failure_file="/tmp/clash/ipset_apply_failed.$$"
-    mkdir -p /tmp/clash
-    rm -f "$iptables_failure_file"
-    rm -f "$ipset_failure_file"
-    IPTABLES_FAILURE_TRACKER="$iptables_failure_file"
-    IPSET_FAILURE_TRACKER="$ipset_failure_file"
-
-    # Create all chains first before applying any rules
-    iptables -t mangle -N CLASH 2>/dev/null
-    iptables -t mangle -N CLASH_LOCAL 2>/dev/null
-    iptables -t mangle -N CLASH_PROCESS 2>/dev/null
-
-    # Set up fakeip whitelist ipset so that rules referencing it by name always succeed
-    if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && hash ipset 2>/dev/null; then
-        if ! ensure_fakeip_ipset || ! populate_fakeip_ipset_from_file; then
-            warn "Failed to prepare fakeip whitelist ipset"
-            rollback_iptables_rules "$iptables_failure_file"
-            return 1
-        fi
-    fi
-
-    # Exclude forwarded traffic (DNAT) from TPROXY to prevent conflicts.
-    # This ensures that incoming connections for port forwarding are not hijacked
-    # by the transparent proxy and can reach their internal destination.
-    iptables -t mangle -I CLASH 1 -m conntrack --ctstate DNAT -j RETURN
-    msg "DNAT traffic exclusion rule applied"
-
-    # Apply rules based on the operation mode
-    case "$MODE" in
-        "explicit")
-            apply_iptables_explicit_interface_rules || { rollback_iptables_rules "$iptables_failure_file"; return 1; }
-            ;;
-        *) # exclude mode
-            local excluded_interfaces=$(get_excluded_interfaces)
-            apply_iptables_exclude_interface_rules "$excluded_interfaces"
-            iptables -t mangle -A CLASH -j CLASH_PROCESS
-
-            # In exclude mode, we also need to process locally generated traffic
-            apply_iptables_output_rules "$server_ips" "$excluded_interfaces" "$fake_ip_filter_mode" "$fake_ip_range"
-            msg "iptables output rules applied (exclude mode)"
-            ;;
-    esac
-
-    # Apply common exclusion and marking rules
-    apply_iptables_loop_prevention
-    apply_iptables_clash_exclusions
-    apply_iptables_quic_blocking
-
-    # Skip exclusion rules in whitelist mode
-    if [ "$fake_ip_filter_mode" != "whitelist" ]; then
-        apply_iptables_dhcp_rules
-        apply_iptables_reserved_networks
-        apply_iptables_server_exclusions "$server_ips"
-        msg "Full exclusion rules applied"
-    else
-        msg "Minimal exclusion rules applied (fake-ip-filter-mode: whitelist - only system protection)"
-    fi
-
-    apply_iptables_tproxy_rules "$fake_ip_range" "$server_ips"
-
-    # Allow forwarding between LAN and clash-tun in TUN/MIXED mode
-    apply_iptables_tun_forward_rules
-
-    # Hook the main chains into the system. This is the entry point.
-    iptables -t mangle -A PREROUTING -j CLASH
-    if [ "$MODE" != "explicit" ]; then
-        iptables -t mangle -A OUTPUT -j CLASH_LOCAL
-        msg "iptables rules applied successfully (exclude mode with output processing)"
-    else
-        msg "iptables rules applied successfully (explicit mode without output processing)"
-    fi
-    if [ -f "$iptables_failure_file" ] || [ -f "$ipset_failure_file" ]; then
-        warn "One or more iptables/ipset commands failed; rolling back the incomplete firewall setup"
-        rm -f "$ipset_failure_file"
-        rollback_iptables_rules "$iptables_failure_file"
-        return 1
-    fi
-    IPTABLES_FAILURE_TRACKER=""
-    IPSET_FAILURE_TRACKER=""
-    rm -f "$iptables_failure_file"
-    rm -f "$ipset_failure_file"
 }
 
 # This function intelligently updates subscription IPs without a full script restart
@@ -3760,10 +3283,10 @@ teardown_routing_rules() {
     while ip rule del pref "$PREF_TUN_UDP" fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
 }
 
-# Atomically refresh the fakeip whitelist IP-CIDR set contents (nft set or ipset)
+# Atomically refresh the fakeip whitelist IP-CIDR nftables set contents
 # without restarting mihomo or rebuilding firewall chains.
 # =============================================================================
-# SECTION: Fake-IP whitelist — ipset/nft set management for CIDR exclusions
+# SECTION: Fake-IP whitelist — nftables set management for CIDR exclusions
 # =============================================================================
 
 # Rewrite the auto-generated block of $FAKEIP_WHITELIST_FILE in place.
@@ -4045,7 +3568,7 @@ update_fakeip_whitelist_sets() {
         ASCLASH_GROUPED_STATE="empty"
     fi
 
-    # Skip nft/ipset flush+repopulate when the normalized CIDR list matches what
+    # Skip nft flush+repopulate when the normalized CIDR list matches what
     # we last applied (digest in tmpfs). Saves kernel work; digest is cleared on
     # blacklist mode above and lost on reboot (full refresh — correct).
     mkdir -p /tmp/clash 2>/dev/null
@@ -4060,7 +3583,7 @@ update_fakeip_whitelist_sets() {
     prev_digest=""
     [ -f "$FAKEIP_WHITELIST_DIGEST_FILE" ] && prev_digest=$(tr -d '\r\n' < "$FAKEIP_WHITELIST_DIGEST_FILE")
     if [ -n "$prev_digest" ] && [ "$current_digest" = "$prev_digest" ]; then
-        msg "Fakeip whitelist kernel sets unchanged (same CIDR digest, skipping nft/ipset rewrite)"
+        msg "Fakeip whitelist nft set unchanged (same CIDR digest, skipping rewrite)"
         case "$ASCLASH_FAKEIP_STATE" in
             fallback|partial) ;;
             manual) ASCLASH_FAKEIP_STATE="applied-manual" ;;
@@ -4440,16 +3963,16 @@ stop_unlocked() {
         # Always attempt to remove QUIC rules unconditionally: if the setting was
         # changed from "true" to "false" before restart, a conditional removal based
         # on the current value would leave stale rules in the filter table.
-        iptables -t filter -D INPUT -p udp --dport 443 -j REJECT 2>/dev/null
-        iptables -t filter -D FORWARD -p udp --dport 443 -j REJECT 2>/dev/null
-        iptables -t mangle -D PREROUTING -j CLASH 2>/dev/null
-        iptables -t mangle -F CLASH 2>/dev/null
-        iptables -t mangle -X CLASH 2>/dev/null
-        iptables -t mangle -F CLASH_PROCESS 2>/dev/null
-        iptables -t mangle -X CLASH_PROCESS 2>/dev/null
-        iptables -t mangle -D OUTPUT -j CLASH_LOCAL 2>/dev/null
-        iptables -t mangle -F CLASH_LOCAL 2>/dev/null
-        iptables -t mangle -X CLASH_LOCAL 2>/dev/null
+        legacy_iptables -t filter -D INPUT -p udp --dport 443 -j REJECT 2>/dev/null
+        legacy_iptables -t filter -D FORWARD -p udp --dport 443 -j REJECT 2>/dev/null
+        legacy_iptables -t mangle -D PREROUTING -j CLASH 2>/dev/null
+        legacy_iptables -t mangle -F CLASH 2>/dev/null
+        legacy_iptables -t mangle -X CLASH 2>/dev/null
+        legacy_iptables -t mangle -F CLASH_PROCESS 2>/dev/null
+        legacy_iptables -t mangle -X CLASH_PROCESS 2>/dev/null
+        legacy_iptables -t mangle -D OUTPUT -j CLASH_LOCAL 2>/dev/null
+        legacy_iptables -t mangle -F CLASH_LOCAL 2>/dev/null
+        legacy_iptables -t mangle -X CLASH_LOCAL 2>/dev/null
         teardown_routing_rules
         msg "iptables rules removed successfully"
     else

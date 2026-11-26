@@ -656,8 +656,8 @@ msgstr "完整重启：停止并启动 Mihomo 内核，重建防火墙规则并�
 msgid "Service is not running — config reload requires a running Mihomo instance. Use \"Save & Restart core\" instead."
 msgstr "服务未运行，配置重载需要正在运行的 Mihomo 实例。请改用“保存并重启内核”。"
 
-msgid "Config reload failed (%s, HTTP %s). %s Try \"Save & Restart core\" for a full restart."
-msgstr "配置重载失败（%s，HTTP %s）。%s 请尝试使用“保存并重启内核”进行完整重启。"
+msgid "Config reload failed (%s, HTTP %s). %s %s Try \"Save & Restart core\" for a full restart."
+msgstr "配置重载失败（%s，HTTP %s）。%s %s 请尝试使用“保存并重启内核”进行完整重启。"
 
 msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)"
 msgstr "（提示：系统 curl 不支持 HTTPS。请安装 curl-ssl，或使用普通 external-controller 进行热重载。）"

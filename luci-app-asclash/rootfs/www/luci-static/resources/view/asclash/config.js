@@ -232,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.37';
+const ASCLASH_VERSION = '4.8.2.38';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -357,6 +357,8 @@ return view.extend({
         const saveAndReloadConfig = async function() {
             if (startStopButton) startStopButton.disabled = true;
             let staged = null;
+            let configCommitted = false;
+            let reloadAccepted = false;
             try {
                 if (!(await getServiceStatus())) {
                     ui.addNotification(null, E('p',
@@ -368,6 +370,9 @@ return view.extend({
                 staged = await validateAndStageConfig();
                 if (staged === null) return;
                 const value = staged.value;
+
+                await view_asclash_utils.commitStagedConfig(staged.stagedPath);
+                configCommitted = true;
 
                 const ec = parseYamlValue(value, 'external-controller');
                 const ecTls = parseYamlValue(value, 'external-controller-tls');
@@ -381,13 +386,14 @@ return view.extend({
                 );
                 const scheme = useTls ? 'https' : 'http';
 
-                const stagedName = staged.stagedPath.substring('/opt/clash/'.length);
+                // Validate the staged file locally, then reload Mihomo's configured path.
+                // Passing the temporary filename to /configs is rejected by some cores.
                 const curlArgs = [
-                    '-sS', '-o', '/dev/null', '-w', '%{http_code}',
+                    '-sS', '-w', '\n%{http_code}',
                     '-X', 'PUT',
                     '-H', 'Content-Type: application/json',
                     '-H', 'Authorization: Bearer ' + secret,
-                    '--data', JSON.stringify({ path: stagedName, payload: '' }),
+                    '--data', JSON.stringify({ path: '', payload: '' }),
                     '--connect-timeout', '5',
                     '--max-time', '15'
                 ];
@@ -397,28 +403,30 @@ return view.extend({
                 curlArgs.push(scheme + '://' + host + ':' + port + '/configs?force=true');
 
                 const res = await fs.exec('curl', curlArgs);
-                const httpCode = (res.stdout || '').trim();
+                const responseLines = String(res.stdout || '').split(/\r?\n/);
+                const httpCode = (responseLines.pop() || '').trim();
+                const responseBody = responseLines.join('\n').trim();
 
                 if (res.code !== 0 || (httpCode !== '204' && httpCode !== '200')) {
-                    await view_asclash_utils.discardStagedConfig(staged.stagedPath);
-                    let detail = (res.stderr || '').trim();
+                    let rollbackMessage = '';
+                    try {
+                        await view_asclash_utils.writeFileAtomic('/opt/clash/config.yaml', staged.previousConfig);
+                        configCommitted = false;
+                        rollbackMessage = _('The previous configuration was restored on disk.');
+                    } catch (rollbackError) {
+                        rollbackMessage = _('The previous configuration could not be restored: %s').format(rollbackError.message || String(rollbackError));
+                    }
+                    let detail = [res.stderr, responseBody].filter(Boolean).join('\n').trim();
                     if (useTls && /Protocol\s+"?https"?\s+not\s+supported/i.test(detail)) {
                         detail += ' ' + _('(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)');
                     }
                     ui.addNotification(null, E('p',
-                        _('Config reload failed (%s, HTTP %s). %s Try "Save & Restart core" for a full restart.')
-                        .format(scheme, httpCode || 'n/a', detail ? detail : '')
+                        _('Config reload failed (%s, HTTP %s). %s %s Try "Save & Restart core" for a full restart.')
+                        .format(scheme, httpCode || 'n/a', detail, rollbackMessage)
                     ), 'error');
                     return;
                 }
-
-                try {
-                    await view_asclash_utils.commitStagedConfig(staged.stagedPath);
-                } catch (e) {
-                    await view_asclash_utils.discardStagedConfig(staged.stagedPath);
-                    ui.addNotification(null, E('p', _('Configuration was loaded into Mihomo, but could not be saved to disk: %s').format(e.message || String(e))), 'error');
-                    return;
-                }
+                reloadAccepted = true;
                 ui.addNotification(null, E('p', _('Configuration saved successfully.')), 'info');
 
                 const progressBefore = await view_asclash_utils.getListProgress();
@@ -442,6 +450,13 @@ return view.extend({
             } catch(e) {
                 if (staged && staged.stagedPath)
                     await view_asclash_utils.discardStagedConfig(staged.stagedPath);
+                if (configCommitted && !reloadAccepted && staged) {
+                    try {
+                        await view_asclash_utils.writeFileAtomic('/opt/clash/config.yaml', staged.previousConfig);
+                    } catch (rollbackError) {
+                        e.message += '; ' + _('The previous configuration could not be restored: %s').format(rollbackError.message || String(rollbackError));
+                    }
+                }
                 ui.addNotification(null, E('p',
                     _('Config reload error: %s. Try "Save & Restart core" for a full restart.').format(e.message)
                 ), 'error');
