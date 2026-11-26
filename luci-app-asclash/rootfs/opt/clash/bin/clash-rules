@@ -76,6 +76,7 @@ ASCLASH_FAKEIP_ISSUES=""
 ASCLASH_GROUPED_STATE="unknown"
 ASCLASH_GROUPED_FALLBACK="false"
 AUTO_FAKEIP_ISSUES=""
+AUTO_FAKEIP_DEFER_MISSING="false"
 FAKEIP_REFRESH_STATE="ready"
 FAKEIP_REFRESH_FALLBACK="false"
 FAKEIP_REFRESH_ISSUES=""
@@ -2174,7 +2175,8 @@ generate_fakeip_whitelist_auto() {
         esac
 
         if [ ! -f "$full_path" ]; then
-            msg "Auto fakeip whitelist: provider '$set_name' file not found: $full_path (skipped)"
+            [ "$AUTO_FAKEIP_DEFER_MISSING" = "true" ] || \
+                msg "Auto fakeip whitelist: provider '$set_name' file not found: $full_path (skipped)"
             printf '%s|%s|missing\n' "$set_name" "$full_path" >> "$tmp_incomplete"
             continue
         fi
@@ -3745,7 +3747,7 @@ refresh_fakeip_whitelist_file() {
     # their files. Hashing every provider file alone misses config rule changes
     # when the set of available provider files stays the same.
     local _fp_base_dir _fp_digest_file _fp_current_digest _fp_saved_digest
-    local _fp_selected _fp_providers _fp_inline _fp_summary_count existing_auto_count _fp_issues_file _fp_provider_line _fp_path _fp_full_path
+    local _fp_selected _fp_providers _fp_inline _fp_summary_count existing_auto_count _fp_issues_file _fp_provider_line _fp_path _fp_full_path _fp_only_missing
     _fp_base_dir=$(get_providers_base_dir)
     _fp_digest_file="/opt/clash/lst/mrs_cache/.whitelist_src_digest"
     mkdir -p /opt/clash/lst/mrs_cache 2>/dev/null
@@ -3850,6 +3852,7 @@ refresh_fakeip_whitelist_file() {
     auto_entries=$(cat "$tmp_auto" 2>/dev/null)
     rm -f "$tmp_auto"
     FAKEIP_REFRESH_ISSUES="$AUTO_FAKEIP_ISSUES"
+    _fp_only_missing=$(printf '%s\n' "$AUTO_FAKEIP_ISSUES" | awk -F'|' 'NF && $3 != "missing" { bad=1 } END { print bad ? "false" : "true" }')
     rm -f "$_fp_issues_file"
 
     if [ "$AUTO_FAKEIP_INCOMPLETE" = "true" ] && [ "${existing_auto_count:-0}" -gt 0 ]; then
@@ -3858,7 +3861,11 @@ refresh_fakeip_whitelist_file() {
         else
             rm -f "$FAKEIP_WHITELIST_SUMMARY_FILE"
         fi
-        msg "WARNING: Auto fakeip whitelist generation incomplete; keeping existing generated block ($existing_auto_count entries)"
+        if [ "$AUTO_FAKEIP_DEFER_MISSING" = "true" ] && [ "$_fp_only_missing" = "true" ]; then
+            msg "Rule-provider files are pending during core startup; preserving cached Fake-IP block ($existing_auto_count entries)"
+        else
+            warn "Auto fakeip whitelist generation incomplete; keeping existing generated block ($existing_auto_count entries)"
+        fi
         FAKEIP_REFRESH_STATE="fallback"
         FAKEIP_REFRESH_FALLBACK="true"
         return 0
@@ -3925,6 +3932,8 @@ refresh_fakeip_whitelist_file() {
     printf '%s\n' "$_fp_current_digest" > "$_fp_digest_file"
     if [ -n "$AUTO_FAKEIP_SOURCES" ]; then
         msg "Auto fakeip whitelist refreshed: $count IPv4 CIDR entries from rule-providers [$AUTO_FAKEIP_SOURCES]"
+    elif [ "$AUTO_FAKEIP_DEFER_MISSING" = "true" ] && [ "$AUTO_FAKEIP_INCOMPLETE" = "true" ] && [ "$_fp_only_missing" = "true" ]; then
+        msg "Rule-provider files are pending during core startup; the initial Fake-IP list will be refreshed after providers load"
     else
         msg "Auto fakeip whitelist refreshed: no matching rule-providers contained IPv4 CIDRs"
     fi
@@ -4290,7 +4299,12 @@ start() {
     # (both modes leave part of the traffic on real IPs and need firewall-level
     # marking for services — see is_ipcidr_whitelist_mode()).
     if is_ipcidr_whitelist_mode; then
+        # The core has not started yet, so tmpfs-backed rule-provider files may
+        # be absent by design. Keep the last generated block and defer noisy
+        # per-provider missing-file messages until the post-start readiness check.
+        AUTO_FAKEIP_DEFER_MISSING="true"
         refresh_fakeip_whitelist_file
+        AUTO_FAKEIP_DEFER_MISSING="false"
         FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
         generate_grouped_port_sources >/dev/null || {
             warn "Grouped IP-CIDR rule generation failed; refusing to start with an incomplete firewall policy"
