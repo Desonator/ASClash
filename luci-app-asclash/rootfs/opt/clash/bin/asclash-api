@@ -13,7 +13,7 @@ yaml_scalar() {
 		sub(/[ \t]+$/, "", value)
 		return value
 	}
-	function decode_quoted(value, quote, result, i, ch, next) {
+	function decode_quoted(value, quote, result, i, ch, escaped_char) {
 		result = ""
 		for (i = 2; i <= length(value); i++) {
 			ch = substr(value, i, 1)
@@ -24,11 +24,11 @@ yaml_scalar() {
 			}
 			if (ch == quote) break
 			if (quote == "\"" && ch == "\\") {
-				next = substr(value, ++i, 1)
-				if (next == "n") result = result "\n"
-				else if (next == "r") result = result "\r"
-				else if (next == "t") result = result "\t"
-				else result = result next
+				escaped_char = substr(value, ++i, 1)
+				if (escaped_char == "n") result = result "\n"
+				else if (escaped_char == "r") result = result "\r"
+				else if (escaped_char == "t") result = result "\t"
+				else result = result escaped_char
 			} else result = result ch
 		}
 		return result

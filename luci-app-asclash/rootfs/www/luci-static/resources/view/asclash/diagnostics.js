@@ -621,7 +621,6 @@ return view.extend({
 			: _('This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode.'));
 		const tproxyTestButton = E('button', {
 			'class': 'btn',
-			'disabled': !tproxyTestAvailable,
 			'click': async function() {
 				tproxyTestButton.disabled = true;
 				try {
@@ -637,6 +636,7 @@ return view.extend({
 				}
 			}
 		}, _('Test TPROXY reception'));
+		tproxyTestButton.disabled = !tproxyTestAvailable;
 		const tproxyTestCard = card(_('TPROXY reception test'), E('div', {}, [tproxyTestButton, tproxyTestMessage]));
 
 		const warningContent = warnings.length
