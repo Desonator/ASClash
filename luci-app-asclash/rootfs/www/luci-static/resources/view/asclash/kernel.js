@@ -206,14 +206,17 @@ function createKernelManagementSection() {
 	const downloadButton = E('button', { class: 'btn' }, _('Download Latest Kernel'));
 	const refreshButton = E('button', { class: 'btn', style: 'margin-left: 10px;' }, _('Refresh Status'));
 	const restartButton = E('button', { class: 'btn', style: 'margin-left: 10px;' }, localized('Restart Service', 'Перезапустить службу'));
-	const actions = E('div', { style: 'margin: 20px 0; text-align: center;' }, [downloadButton, refreshButton, restartButton]);
-	const notice = E('div', { style: `margin: 10px 0 20px; padding: 8px 12px; background: ${light ? '#fff3cd' : 'rgba(255,193,7,0.12)'}; border-left: 4px solid #ffc107; border-radius: 4px; font-size: 12px; color: ${light ? '#856404' : '#fcd34d'};` }, _('Restart Clash service after installing or updating the kernel'));
+	const actions = E('div', { style: 'margin: 12px 0 20px; text-align: center;' }, [downloadButton, refreshButton, restartButton]);
+	const notice = E('div', { style: `margin: 12px 0 6px; padding: 8px 12px; background: ${light ? '#fff3cd' : 'rgba(255,193,7,0.12)'}; border-left: 4px solid #ffc107; border-radius: 4px; font-size: 12px; color: ${light ? '#856404' : '#fcd34d'};` }, localized(
+		'Restart Clash service after installing or updating the kernel',
+		'Перезапустите службу Clash после установки или обновления ядра'
+	));
 	container.appendChild(E('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0;' }, [
 		E('label', { class: 'cbi-value-title', style: 'width:auto;' }, localized('Release source', 'Источник релизов')), sourceSelect, repoInput, saveButton
 	]));
 	container.appendChild(status);
-	container.appendChild(actions);
 	container.appendChild(notice);
+	container.appendChild(actions);
 
 	let badgesUpdating = false;
 	let previousRuntimeState = null;
