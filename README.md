@@ -1,304 +1,210 @@
-📖 Read this in other languages:
-- [Русский](README.ru.md)
+# ASClash — Advanced Simple Clash
 
-> **ASClash (Advanced Simple Clash)** is an OpenWrt proxy-management application maintained by Desonator and based on the [SSClash project by ZeroChaos](https://github.com/zerolabnet/SSClash).
+**ASClash** — LuCI-приложение для OpenWrt, которое управляет ядром Mihomo и направлением IPv4-трафика через TPROXY и/или TUN. Проект является форком [SSClash от ZeroChaos](https://github.com/zerolabnet/SSClash); форк развивается Desonator для OpenWrt.
 
-<h3 align="center">Advanced Simple Clash — install and configure ASClash on OpenWrt</h3>
+**Язык:** русский — основной README. [English version](README.en.md).
 
-# Setup Guide
+> ASClash использует Mihomo для обработки соединений. Приложение формирует правила firewall и policy routing, но конечное действие для попавшего в ядро трафика задаётся вашей конфигурацией Mihomo и порядком её правил.
 
-# Autoinstall script
+## Что добавлено в форке ASClash
 
-Installs or updates all dependencies, the ASClash LuCI package and the Mihomo core.
-The installer migrates the old `luci-app-ssclash` package to `luci-app-asclash`
-and preserves configuration and user data under `/opt/clash`.
+ASClash сохраняет базовые возможности исходного LuCI-проекта — установку и обновление ядра, выбор сетевых интерфейсов, TPROXY/TUN, редактор конфигурации, локальные rule-set, журналы и доступ к панели Mihomo — и дополняет их функциями для разбора правил и диагностики.
 
-```bash
+Сравнение ниже относится к LuCI-приложению в [репозитории SSClash](https://github.com/zerolabnet/SSClash), а не к его отдельной Go-редакции.
+
+| Область | Дополнения ASClash |
+| --- | --- |
+| Диагностика | Отдельная страница проверяет состояние службы и ядра, доступность локального Mihomo API, согласованность настроенного сетевого режима с nftables, `ip rule`, маршрутами и TUN-интерфейсом. Проверка только для чтения. |
+| Формирование списков | Показываются результаты последнего цикла: состояние списков безусловных IP-CIDR и grouped AND, счётчики, причины пропуска источников и информация о сохранении предыдущего набора, если новые provider-файлы ещё не готовы. Старые сообщения журнала доступны отдельно. |
+| Fake-IP IP-CIDR | Список IPv4-адресов для Fake-IP режимов строится из используемых rule-providers и подходящих inline-правил. Есть сводка по provider-ам, FAQ и сохранение ручных записей вне автоматически обновляемого блока. |
+| Сложные AND-правила | Поддерживаемые правила `AND` преобразуются в IPv4-наборы и компактные правила nftables по протоколу/порту. Совпадающие источники и наборы переиспользуются; условия TCP/UDP и портов остаются отдельными. |
+| Smart-группы | По отдельной настройке на странице «Статус» отображаются серверы и веса групп `type: smart`, если используемое ядро предоставляет нужный API. |
+| Источник ядра | Можно выбрать официальный Mihomo, Prizrak-Core или другой GitHub-репозиторий с совместимыми релизами. Архитектура роутера определяется автоматически. |
+| Работа службы | Статусные уведомления сообщают о перезапуске и результате формирования/применения списков; на странице конфигурации доступны действия со службой и переход к панели управления. |
+
+Подробнее о правилах, ограничениях парсера и Fake-IP — в разделе [«Обработка трафика и списки IP-CIDR»](#обработка-трафика-и-списки-ip-cidr).
+
+## Требования и совместимость
+
+- OpenWrt **22.03 или новее**, с **firewall4/nftables**. Минимальная версия указана для целевого стека firewall; пакеты CI собираются на OpenWrt 24.10 и 25.12.
+- Только **IPv4**. IPv6-маршрутизация ASClash не настраивается.
+- Для TPROXY требуется `kmod-nft-tproxy`; для TUN — `kmod-tun`. Автоустановщик устанавливает необходимые пакеты.
+- Пакет LuCI архитектурно-независимый, но ядро Mihomo должно соответствовать архитектуре роутера.
+- На OpenWrt 22.03–24.10 используется `opkg`; на OpenWrt 25 и новее — `apk`.
+
+Grouped AND-правила применяются только через nftables. Это ограничение относится именно к генератору grouped AND; проект ASClash ориентирован на firewall4/nftables.
+
+## Установка
+
+### Автоматическая установка
+
+Скрипт определяет версию OpenWrt и архитектуру, устанавливает зависимости, пакет ASClash и совместимое ядро из выбранного источника релизов:
+
+```sh
 wget --no-proxy -qO- https://github.com/Desonator/ASClash/raw/refs/heads/main/install-asclash.sh | ash
 ```
 
-# Manual install
+Перед запуском скрипта рекомендуется ознакомиться с его содержимым. Установщик использует последний опубликованный релиз ASClash.
 
-## Step 1: Update Package List
+### Ручная установка
 
-Update the package list to ensure you have the latest available versions.
-
-For **OpenWrt >= 25** (apk):
-
-```bash
-apk update
-```
-
-For **OpenWrt < 25** (opkg):
-
-```bash
-opkg update
-```
-
-## Step 2: Install Required Packages
-
-In general, package managers resolve dependencies automatically when you install from a package repository. In this guide, we use manual installation from GitHub Releases, and required dependencies are:
-
-- `coreutils-base64` – for scripts that use Base64;
-- `kmod-tun` – for TUN mode;
-- the appropriate transparent proxy module depending on your firewall stack:
-  - `kmod-nft-tproxy` for **firewall4 / nftables**;
-  - `iptables-mod-tproxy` for **firewall3 / iptables**.
-
-Only if you are installing packages manually (`.apk`/`.ipk`) or building a custom image and dependencies are missing, you can install the transparent proxy modules manually:
-
-```bash
-# For nftables (firewall4) on OpenWrt >= 25:
-apk add kmod-nft-tproxy
-
-# For nftables (firewall4) on older OpenWrt:
-opkg install kmod-nft-tproxy
-
-# For iptables (firewall3, OpenWrt < 22.03.x):
-opkg install iptables-mod-tproxy
-```
-
-## Step 3: Download and Install the ASClash Package
-
-Download the ASClash package and install it. If migrating manually from the
-old package, stop the service and remove `luci-app-ssclash` first; the config
-and user data under `/opt/clash` are kept.
-
-```bash
-# OpenWrt >= 25:
-/etc/init.d/clash stop 2>/dev/null || true
-curl -L https://github.com/Desonator/ASClash/releases/download/v4.7.1/luci-app-asclash-4.7.1-r1.apk -o /tmp/luci-app-asclash-4.7.1-r1.apk
-apk del luci-app-ssclash 2>/dev/null || true
-apk add --allow-untrusted /tmp/luci-app-asclash-4.7.1-r1.apk
-
-# OpenWrt < 25:
-/etc/init.d/clash stop 2>/dev/null || true
-curl -L https://github.com/Desonator/ASClash/releases/download/v4.7.1/luci-app-asclash_4.7.1-r1_all.ipk -o /tmp/luci-app-asclash_4.7.1-r1_all.ipk
-opkg remove luci-app-ssclash 2>/dev/null || true
-opkg install /tmp/luci-app-asclash_4.7.1-r1_all.ipk
-
-rm -f /tmp/luci-app-asclash_4.7.1-r1_all.ipk /tmp/luci-app-asclash-4.7.1-r1.apk
-```
-
-## Step 4: Kernel management
-
-Open **Services → ASClash → Status → Mihomo Kernel Management**. The page detects
-the router architecture, checks the installed binary and can install the latest
-release from either the official `MetaCubeX/mihomo` repository or a custom
-GitHub repository (for example, `legiz-ru/Prizrak-Core`). Choose and save the
-release source before checking or installing its kernel. The installer selects
-the matching release asset, verifies the installed executable and reports the
-installed and latest versions. Restart the Clash service after an installation
-or update to start the new binary.
-
-On a first package installation, the service is deliberately left disabled at
-boot so you can review/edit the example configuration before starting it. Start
-the service from LuCI (or enable it with `/etc/init.d/clash enable`) after the
-configuration is ready; subsequent boots will then start it automatically.
-
-The status badges periodically check the init service and the running
-`/opt/clash/bin/clash` process. The page refreshes when it detects a service or
-kernel transition. Configuration validation uses the selected core's
-capabilities; when using Prizrak-Core, the configured-source validator is used
-so Prizrak-specific configuration fields are not rejected by stock Mihomo.
-
-## Step 5: Configure traffic processing
-
-ASClash offers two interface processing modes:
-
-### Exclude Mode (Universal approach) - **Recommended for most users**
-
-- **Default mode** that processes traffic from ALL interfaces except selected ones
-- Automatically detects and excludes WAN interface
-- Simple to configure - just select interfaces to bypass proxy
-- Best for typical home router setups
-
-### Explicit Mode (Precise control) - **For advanced users**
-
-- Processes traffic ONLY from selected interfaces
-- More secure but requires manual configuration
-- Automatically detects LAN bridge when enabled
-- Ideal for complex network setups requiring precise control
-
-### Additional Settings:
-
-- **Block QUIC traffic**: Blocks UDP port 443 to improve proxy effectiveness for services like YouTube
-- **Store rules and proxy providers in RAM**: rulesets and proxy-providers directories are placed on tmpfs to extend the lifespan of the NAND chip
-- **Add HWID headers to subscriptions**: Automatically adds HWID headers to proxy-providers (Remnawave compatibility)
-
-The service supports TPROXY, TUN and MIXED proxy modes. In MIXED mode, TCP is
-handled through TPROXY and UDP through TUN. TUN mode requires `/dev/net/tun` and
-the `kmod-tun` package; transparent proxy mode requires the matching TPROXY
-kernel module for the router's firewall stack. TUN/MIXED also install the
-necessary forwarding and policy-routing state for the `clash-tun` interface.
-The optional TUN stack (`system`, `gvisor` or `mixed`) is configured in the
-Mihomo YAML configuration.
-
-<p align="center">
- <img src=".github/assets/images/screenshots/scr-01.png" width="100%">
-</p>
-
-## Step 6: ASClash Configuration Management
-
-Edit your Clash configuration with the built-in editor featuring:
-
-- **Syntax highlighting** for YAML files
-- **Live service control** (Start/Stop/Restart)
-- **Service status indicator**
-
-<p align="center">
- <img src=".github/assets/images/screenshots/scr-02.png" width="100%">
-</p>
-
-## Step 7: Local Rulesets Management
-
-Create and manage local rule files for use with `rule-providers`:
-
-- **Create custom rule lists** with validation
-- **Organized file management** with collapsible sections
-
-<p align="center">
- <img src=".github/assets/images/screenshots/scr-03.png" width="100%">
-</p>
-
-## Step 8: Real-time Log Monitoring
-
-Monitor Clash activity with the integrated log viewer:
-
-- **Real-time log streaming** with automatic updates
-- **Filtered display** showing only Clash-related entries
-- **Color-coded log levels** and daemon identification
-- **Auto-scroll** to latest entries
-
-<p align="center">
- <img src=".github/assets/images/screenshots/scr-04.png" width="100%">
-</p>
-
-## Step 9: Dashboard Access
-
-Access the Clash dashboard directly from the LuCI interface with automatic configuration detection.
-
-<p align="center">
- <img src=".github/assets/images/screenshots/scr-05.png" width="100%">
-</p>
-
-# Network behavior and generated IP-CIDR lists
-
-### Interface selection and traffic outside the proxy
-
-In **Exclude** interface mode, eligible traffic is processed except traffic on
-excluded interfaces (WAN is detected and excluded when automatic detection is
-enabled). In **Explicit** mode, only selected interfaces are processed. The
-firewall rules also bypass reserved/local networks, the router's own proxy
-servers, configured Clash ports and traffic already carrying routing marks, to
-avoid proxy loops. These firewall rules select which connections enter Mihomo;
-the final route/action for traffic that does enter the core remains governed by
-the Mihomo configuration and rule order.
-
-### Fake-IP whitelist (plain IP-CIDR list)
-
-When `dns.fake-ip-filter-mode` is `whitelist` or `rule`, the firewall can mark
-traffic to IPv4 addresses/subnets in `/opt/clash/lst/fakeip-whitelist-ipcidr.txt`.
-The LuCI status page shows provider counts and a FAQ for this list. The file
-supports manual entries and an auto-generated section delimited by
-`AUTO-BEGIN`/`AUTO-END`; manual content outside these markers is preserved.
-Automatic generation reads IPv4 `IP-CIDR` entries from providers referenced by
-non-`DIRECT`/non-`REJECT` rules and relevant `RULE-SET` entries in
-`dns.fake-ip-filter`, plus literal top-level `IP-CIDR` rules whose action is
-not `DIRECT`, `REJECT`, `REJECT-DROP` or `PASS`. Set `AUTO_FAKEIP_WHITELIST=false` in
-`/opt/clash/settings` to disable generation and manage the list manually.
-Changes are applied by the firewall without restarting Mihomo.
-
-In `whitelist` mode, only DNS matches selected by Mihomo receive fake IPs; in
-`rule` mode, `fake-ip-filter` is evaluated top-down and each match chooses
-`fake-ip` or `real-ip`. Fake-IP destinations are routed by the fake-IP range;
-real-IP destinations reach Mihomo only when matched by the generated/manual
-CIDR lists or other firewall rules. Arbitrary DNS answers for domain-only
-`real-ip` rules cannot be inferred into static IP sets, so they may bypass the
-core unless separately covered.
-
-### Grouped `AND` IP-CIDR rules (nftables only)
-
-For supported `AND` rules combining a provider or direct IPv4 `IP-CIDR` entries
-with `NETWORK` and/or `DST-PORT`, ASClash creates separate nftables IPv4 sets
-and applies compact protocol/port marking rules. Port ranges stay ranges; CIDRs
-are not expanded into IP/port pairs. This feature is nftables-only; grouped
-`AND` rules are not applied by the iptables backend. The status page reports
-providers, networks, destination ports and entry counts, and provides a FAQ.
-When an AND rule has several CIDR operands, the generated set contains their
-intersection, not their union. Rules whose final action is `DIRECT`, `REJECT`
-or `REJECT-DROP` are omitted from grouped firewall generation. Other actions
-are marked into Mihomo so its own rule engine can continue evaluating them.
-Identical resulting CIDR sets are shared across rules with different
-network/port conditions; those conditions remain separate nftables rules. The
-status table lists each provider once, combines its network/port conditions,
-and counts that provider's own unique CIDRs. The overall total counts each
-unique merged firewall set only once.
-Grouped rules process eligible transit traffic; router-originated traffic uses
-the separate output-chain policy and is intentionally not matched by these sets.
-
-Generation is enabled by default in the `clash-rules` configuration and has
-limits (`GROUPED_FAKEIP_MAX_GROUPS=32`,
-`GROUPED_FAKEIP_MAX_CIDRS=150000`). If a limit is exceeded, generation fails
-instead of applying an oversized generated batch. `GROUPED_FAKEIP_PORT_RULES_DRY_RUN=true`
-generates/validates without applying the grouped batch. Generated source and
-batch digests avoid unnecessary parsing and firewall changes; updates are
-serialized with a lock. Provider-derived data is refreshed after the core has
-started and its provider files become available, on WAN-up, and by the
-30-minute cron job installed with the package. Unchanged source data does not
-require a firewall rebuild.
-
-### Smart-group weights
-
-On the Status page, ASClash detects groups configured with `type: smart` and
-queries the core's external-controller API for their unique server weights.
-Each group is displayed separately; server cards are sorted by current weight
-and color-coded from red (low) through yellow to green (high). Weights refresh
-in the browser every 30 seconds while the page is visible. The section is
-omitted when there are no Smart groups or the core does not expose the required
-API. The LuCI backend requests the weights from the router, so the configured
-external controller must be reachable from the router. Configure its access
-secret if one is set.
-
-## Grouped `AND` rule example
-
-For example, this supported rule refers to an IP-CIDR provider and restricts
-the firewall mark to the specified UDP destination-port range:
-
-```yaml
-- AND,((RULE-SET,cloudflare-ip),(DST-PORT,80,443,2052,2053,2082,2083,2086,2087,2095,2096,8080,8443,8880)),Подсети IP-CIDR
-- AND,((RULE-SET,discord-voice),(NETWORK,udp),(DST-PORT,50000-50100)),Discord
-- AND,((IP-CIDR,186.157.42.56/32),(NETWORK,tcp),(DST-PORT,80,443,2050-2100,8080-8880)),Подсети IP-CIDR
-```
-
-The following settings in `/opt/clash/settings` control the generated batch
-(they do not replace Mihomo's own rule engine):
+1. Откройте [страницу релизов ASClash](https://github.com/Desonator/ASClash/releases) и скачайте пакет для своей версии OpenWrt: `.ipk` для `opkg` или `.apk` для `apk`.
+2. Установите зависимости, если пакетный менеджер не установил их автоматически:
 
 ```sh
-GROUPED_FAKEIP_PORT_RULES_ENABLED="true"
-GROUPED_FAKEIP_PORT_RULES_DRY_RUN="false"
-GROUPED_FAKEIP_MAX_GROUPS="32"
-GROUPED_FAKEIP_MAX_CIDRS="150000"
+# OpenWrt 22.03–24.10
+opkg update
+opkg install kmod-nft-tproxy kmod-tun coreutils-base64 curl
+
+# OpenWrt 25+
+apk update
+apk add kmod-nft-tproxy kmod-tun coreutils-base64 curl
 ```
 
-To syntax-check a generated batch without applying it, use:
+3. Установите скачанный пакет:
+
+```sh
+# OpenWrt 22.03–24.10
+opkg install /tmp/luci-app-asclash_<версия>_all.ipk
+
+# OpenWrt 25+
+apk add --allow-untrusted /tmp/luci-app-asclash-<версия>-r1.apk
+```
+
+Пакет сохраняет пользовательскую конфигурацию в `/opt/clash`. При первом запуске службы проверьте пример `/opt/clash/config.yaml`, затем включите службу в LuCI или выполните:
+
+```sh
+/etc/init.d/clash enable
+/etc/init.d/clash start
+```
+
+## Настройка
+
+Страница ASClash находится в LuCI: **Службы → ASClash**.
+
+### Настройки трафика
+
+**Режим интерфейсов** определяет, какой трафик передаётся ядру:
+
+- **Исключения (Exclude):** обрабатываются все интерфейсы, кроме явно исключённых. Автоопределение WAN может добавить WAN-интерфейс в исключения.
+- **Явный (Explicit):** обрабатываются только выбранные интерфейсы. Подходит, когда нужно точно задать источники проксируемого трафика.
+
+Доступны сетевые режимы:
+
+- **TPROXY** — TCP и UDP перехватываются прозрачным прокси.
+- **TUN** — трафик направляется через интерфейс `clash-tun`.
+- **MIXED** — TCP обрабатывается через TPROXY, UDP — через TUN.
+
+Для TUN/MIXED ASClash настраивает policy routing и отслеживает появление `clash-tun`. Параметр TUN stack (`system`, `gvisor` или `mixed`) задаётся в конфигурации Mihomo; доступность вариантов зависит от выбранного ядра.
+
+Дополнительные параметры:
+
+- блокировка QUIC — отклоняет UDP/443;
+- хранение rule-set и proxy-providers в RAM (`tmpfs`) уменьшает записи на постоянный накопитель, расходуя оперативную память;
+- добавление HWID-заголовков к proxy-provider-запросам (совместимость с Remnawave; сами значения заголовков задаются в настройках);
+- показ весов Smart-групп на странице «Статус».
+
+### Управление ядром
+
+В разделе «Настройки» можно выбрать источник релизов:
+
+1. официальный Mihomo;
+2. Prizrak-Core;
+3. произвольный GitHub-репозиторий в формате `владелец/репозиторий`.
+
+ASClash проверяет архитектуру, установленную и доступную версии, скачивает соответствующий бинарный файл и устанавливает его как `/opt/clash/bin/clash`. После замены ядра перезапустите службу. Валидатор конфигурации учитывает выбранный источник; для форков ядра могут быть доступны дополнительные поля конфигурации.
+
+### Конфигурация, списки и журнал
+
+- **Конфигурация** — редактор YAML с подсветкой синтаксиса; здесь же находятся кнопки открытия панели, перезапуска и остановки службы.
+- **Статус** — состояние службы и ядра, IP-CIDR-списки, grouped AND-правила и, при включённой опции, веса Smart-групп.
+- **Диагностика** — только читающая сводка по API Mihomo, сетевому режиму, активным цепочкам и маршрутам, результатам последнего цикла списков и сообщениям парсера.
+- **Локальные rule-set** — управление пользовательскими файлами правил в `/opt/clash/lst`.
+- **Журнал** — сообщения службы и ядра.
+
+## Обработка трафика и списки IP-CIDR
+
+ASClash устанавливает правила firewall и policy routing для выбранных интерфейсов. Зарезервированные и локальные сети, адреса прокси-серверов, служебные порты и уже помеченный трафик исключаются из повторной обработки, чтобы снизить риск петель. Firewall определяет, какие соединения попадут в Mihomo; конечный маршрут и действие для них определяются конфигурацией и порядком правил Mihomo.
+
+### Fake-IP и реальные адреса
+
+В режиме `fake-ip-filter-mode: whitelist` Mihomo выдаёт Fake-IP только доменам, прошедшим его whitelist-логику. В режиме `rule` список `fake-ip-filter` проверяется сверху вниз и для совпадения выбирает `fake-ip` или `real-ip`. Fake-IP-трафик распознаётся по настроенному диапазону.
+
+Если домен получает реальный IP, firewall не может вывести исходный домен из произвольного DNS-ответа. Такой трафик попадёт в Mihomo только при совпадении с IP-CIDR-набором или другим правилом перехвата; иначе он может пройти мимо ядра. Это особенно важно для доменных правил, возвращающих `real-ip`.
+
+В `redir-host` Fake-IP-диапазон не используется. Перехват задаётся режимом интерфейсов и firewall; для доменных правил ядру нужны доступные ему сведения о домене, например полученные через sniffing.
+
+> Внешний DNS, браузерный DoH/DoT и собственные DNS-клиенты устройств могут обходить DNS-настройки роутера. Сам факт, что клиент получил реальный IP, не гарантирует, что доменное правило Mihomo сможет его применить.
+
+### Список IP-CIDR без условий
+
+Для `whitelist` и `rule` ASClash может помечать IPv4-трафик к адресам из `/opt/clash/lst/fakeip-whitelist-ipcidr.txt`, чтобы реальные адреса из известных rule-set тоже попадали в ядро.
+
+Генератор извлекает подходящие `IP-CIDR` из используемых rule-providers, ссылок `RULE-SET` в `dns.fake-ip-filter` и поддерживаемых inline-правил. Записи с терминальными действиями `DIRECT`, `REJECT`, `REJECT-DROP` и `PASS` для прокси-списка не используются. Сгенерированная часть файла заключена между маркерами `AUTO-BEGIN` и `AUTO-END`; ручные строки вне этого блока сохраняются. Чтобы управлять файлом вручную, задайте в `/opt/clash/settings`:
+
+```sh
+AUTO_FAKEIP_WHITELIST="false"
+```
+
+LuCI показывает суммарное число CIDR и подсчёт по provider-ам. Трафик и адреса между разными provider-ами намеренно не дедуплицируются целиком: это позволяет избежать тяжёлой оптимизации больших списков на роутере.
+
+### Группированные AND-правила IP-CIDR (nftables)
+
+Генератор поддерживает ограниченный поднабор правил `AND`, содержащих IPv4-источник `IP-CIDR` или `RULE-SET`, условие `NETWORK` (`tcp` или `udp`) и `DST-PORT` с портами/диапазонами. Например:
+
+```yaml
+- AND,((RULE-SET,cloudflare-ip),(NETWORK,udp),(DST-PORT,19200-19500,50000-50100)),Discord
+- AND,((RULE-SET,cloudflare-ip),(NETWORK,tcp),(DST-PORT,80,443,2050-2100,8080-8880)),Подсети IP-CIDR
+- AND,((IP-CIDR,186.157.42.56/32),(NETWORK,tcp),(DST-PORT,80,443)),Подсети IP-CIDR
+```
+
+Подходящие CIDR-источники объединяются в nftables-наборы, а firewall помечает совпавший трафик для передачи Mihomo. Действие в конце правила остаётся правилом Mihomo: генератор не подменяет маршрутизацию ядра. Правила с итоговым `DIRECT`, `REJECT` или `REJECT-DROP` не превращаются в grouped-наборы. Если в AND несколько CIDR-операндов, используется их пересечение.
+
+Если одинаковый `RULE-SET` встречается с разными TCP/UDP или портовыми условиями, CIDR-источник переиспользуется, а наборы условий остаются раздельными. Сложная глобальная дедупликация всех IP-адресов между разными provider-ами не выполняется. Группированные правила относятся к транзитному трафику устройств и не применяются к трафику, созданному самим роутером.
+
+Генератор включён по умолчанию. Лимиты по числу групп и CIDR предотвращают применение чрезмерно больших наборов; при превышении генерация завершается ошибкой. Добавьте параметр в `/opt/clash/settings` и перезапустите службу, чтобы сформировать batch без применения:
+
+```sh
+GROUPED_FAKEIP_PORT_RULES_DRY_RUN="true"
+```
+
+Проверить синтаксис созданного файла можно командой:
 
 ```sh
 nft -c -f /tmp/clash/fakeip_port_groups.nft
 ```
 
-# Remove ASClash
+Поддерживаемые правила и причины пропуска отображаются на страницах статуса и диагностики.
 
-To remove the ASClash package completely:
+### Ограничения и безопасная настройка
 
-```bash
-# OpenWrt >= 25:
-apk del luci-app-asclash
+- Проект ориентирован на IPv4; правила IPv6 не формируются.
+- Автоматическое исключение конкретного устройства по постоянной DHCP-аренде сейчас не реализовано.
+- Автоматический перевод трафика напрямую при падении всей Smart-группы не реализован.
+- Правила `AND` поддерживаются не целиком: формат и операнды должны соответствовать указанному поднабору.
+- Ранние firewall-правила и списки IP могут определить, попадёт ли соединение в ядро; для окончательного действия и порядка доменных правил используйте конфигурацию Mihomo.
+- Если включён `external-controller`, задайте `secret` и ограничьте доступ к порту доверенной сетью. Не публикуйте API панели в WAN/Интернет.
 
-# OpenWrt < 25:
+## Обновление и удаление
+
+Обновляйте пакет из [последнего релиза](https://github.com/Desonator/ASClash/releases) или повторно запускайте установщик. Пользовательские данные и `config.yaml` находятся в `/opt/clash`; удаление пакета их не удаляет.
+
+Удалить приложение:
+
+```sh
+# OpenWrt 22.03–24.10
 opkg remove luci-app-asclash
+
+# OpenWrt 25+
+apk del luci-app-asclash
 ```
 
-Package removal does not require deleting `/opt/clash`. That directory contains
-the configuration, subscriptions and user data; remove it manually only if you
-intentionally want to erase those files.
+Удаляйте `/opt/clash` отдельно только если хотите стереть конфигурацию, списки и пользовательские данные. Перед этим сохраните резервную копию.
+
+## Проект и лицензия
+
+- Форк: [Desonator/ASClash](https://github.com/Desonator/ASClash)
+- Исходный проект: [zerolabnet/SSClash](https://github.com/zerolabnet/SSClash)
+- Автор форка: [Desonator](https://github.com/Desonator)
+- Исходный проект: [ZeroChaos](https://zerolab.net/) · [Поддержать](https://zerolab.net/donate/)
+- Лицензия: GNU GPL v2.
