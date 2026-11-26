@@ -100,8 +100,8 @@ function parseForcedDnsCounters(redirectChainText) {
 
 function formatForcedDnsCounters(counters) {
 	return [
-		_('Redirected conntrack flows: UDP %d · TCP %d').format(counters.udp.flows, counters.tcp.flows),
-		_('Bypassed flows: excluded interfaces %d · DIRECT sources %d · existing DNAT %d').format(counters.excludedInterfaces.flows, counters.directSources.flows, counters.existingDnat.flows)
+		_('Redirected DNS packets: UDP %d · TCP %d').format(counters.udp.flows, counters.tcp.flows),
+		_('Bypassed DNS packets: excluded interfaces %d · DIRECT sources %d · existing DNAT %d').format(counters.excludedInterfaces.flows, counters.directSources.flows, counters.existingDnat.flows)
 	].join(' · ');
 }
 

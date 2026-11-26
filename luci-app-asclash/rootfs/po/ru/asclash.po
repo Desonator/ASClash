@@ -1362,11 +1362,11 @@ msgstr "Служба остановлена"
 msgid "Rules missing"
 msgstr "Правила отсутствуют"
 
-msgid "Redirected conntrack flows: UDP %d · TCP %d"
-msgstr "Перенаправленные conntrack-потоки: UDP %d · TCP %d"
+msgid "Redirected DNS packets: UDP %d · TCP %d"
+msgstr "Перенаправлено DNS-пакетов: UDP %d · TCP %d"
 
-msgid "Bypassed flows: excluded interfaces %d · DIRECT sources %d · existing DNAT %d"
-msgstr "Исключённые потоки: интерфейсы %d · источники DIRECT %d · существующий DNAT %d"
+msgid "Bypassed DNS packets: excluded interfaces %d · DIRECT sources %d · existing DNAT %d"
+msgstr "Обойдены DNS-пакеты: исключённые интерфейсы %d · источники DIRECT %d · существующий DNAT %d"
 
 msgid "Check dnsmasq port 53, the dns_redirect chain and the system log."
 msgstr "Проверьте порт dnsmasq, цепочку dns_redirect и системный журнал."

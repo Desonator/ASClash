@@ -1328,11 +1328,11 @@ msgstr "服务已停止"
 msgid "Rules missing"
 msgstr "缺少规则"
 
-msgid "Redirected conntrack flows: UDP %d · TCP %d"
-msgstr "已重定向的 conntrack 流：UDP %d · TCP %d"
+msgid "Redirected DNS packets: UDP %d · TCP %d"
+msgstr "已重定向的 DNS 数据包：UDP %d · TCP %d"
 
-msgid "Bypassed flows: excluded interfaces %d · DIRECT sources %d · existing DNAT %d"
-msgstr "已绕过的流：排除接口 %d · DIRECT 来源 %d · 已有 DNAT %d"
+msgid "Bypassed DNS packets: excluded interfaces %d · DIRECT sources %d · existing DNAT %d"
+msgstr "已绕过的 DNS 数据包：排除接口 %d · DIRECT 来源 %d · 已有 DNAT %d"
 
 msgid "Check dnsmasq port 53, the dns_redirect chain and the system log."
 msgstr "请检查 dnsmasq 的 53 端口、dns_redirect 链和系统日志。"
