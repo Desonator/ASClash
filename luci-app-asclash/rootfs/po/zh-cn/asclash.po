@@ -596,8 +596,11 @@ msgstr "服务已成功重载。"
 msgid "Service is restarting…"
 msgstr "服务正在重启…"
 
-msgid "Clash is starting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
-msgstr "Clash 正在启动。首先应用缓存或当前可用的列表；核心启动后，基于 provider 的列表可能会再次刷新。"
+msgid "Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
+msgstr "Clash 正在重启。首先应用缓存或当前可用的列表；核心启动后，基于 provider 的列表可能会再次刷新。"
+
+msgid "Clash is restarting; firewall lists will be rebuilt and applied."
+msgstr "Clash 正在重启；防火墙列表将重新生成并应用。"
 
 msgid "Post-start provider refresh completed: firewall lists were updated after the core started. The earlier cached-list application was part of the same startup."
 msgstr "核心启动后已刷新 provider 列表并应用防火墙规则。此前应用缓存列表属于同一次启动流程。"
