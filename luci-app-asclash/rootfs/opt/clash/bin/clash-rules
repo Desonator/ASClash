@@ -34,6 +34,8 @@ PROXY_MODE="tproxy"
 AUTO_DETECT_LAN="true"
 AUTO_DETECT_WAN="true"
 BLOCK_QUIC="true"
+FORCE_DNS_REDIRECT="false"
+FORCE_DNS_REDIRECT_ACTIVE="false"
 TUN_STACK="system"
 DETECTED_LAN=""
 DETECTED_WAN=""
@@ -243,6 +245,7 @@ load_all_settings_once() {
             "AUTO_DETECT_LAN") AUTO_DETECT_LAN="$value" ;;
             "AUTO_DETECT_WAN") AUTO_DETECT_WAN="$value" ;;
             "BLOCK_QUIC") BLOCK_QUIC="$value" ;;
+            "FORCE_DNS_REDIRECT") FORCE_DNS_REDIRECT="$value" ;;
             "TUN_STACK") TUN_STACK="$value" ;;
             "DETECTED_LAN") DETECTED_LAN="$value" ;;
             "DETECTED_WAN") DETECTED_WAN="$value" ;;
@@ -262,6 +265,7 @@ load_all_settings_once() {
     [ -n "$AUTO_DETECT_LAN" ] && settings_part="$settings_part, Auto-detect LAN: $AUTO_DETECT_LAN"
     [ -n "$AUTO_DETECT_WAN" ] && settings_part="$settings_part, Auto-detect WAN: $AUTO_DETECT_WAN"
     [ -n "$BLOCK_QUIC" ] && settings_part="$settings_part, Block QUIC: $BLOCK_QUIC"
+    [ -n "$FORCE_DNS_REDIRECT" ] && settings_part="$settings_part, Force client DNS: $FORCE_DNS_REDIRECT"
     [ -n "$TUN_STACK" ] && settings_part="$settings_part, TUN stack: $TUN_STACK"
     [ -n "$DETECTED_LAN" ] && settings_part="$settings_part, Detected LAN: $DETECTED_LAN"
     [ -n "$DETECTED_WAN" ] && settings_part="$settings_part, Detected WAN: $DETECTED_WAN"
@@ -2397,8 +2401,9 @@ get_lan_interface() {
 
 # Function to detect WAN interface
 get_wan_interface() {
+    local ignore_auto_setting="${1:-false}"
     # Skip if auto-detection is disabled
-    if [ "$AUTO_DETECT_WAN" = "false" ]; then
+    if [ "$AUTO_DETECT_WAN" = "false" ] && [ "$ignore_auto_setting" != "true" ]; then
         return
     fi
 
@@ -2516,6 +2521,75 @@ apply_nft_explicit_interface_mangle() {
     else
         return 1
     fi
+}
+
+# Redirect client DNS to the router's dnsmasq listener. The separate NAT hook
+# runs before fw4's normal dstnat chain and route lookup, so a fresh client
+# query to an explicitly configured external DNS server is forced to the router.
+# Matching traffic returns from CLASH_MARK first so it cannot be marked for
+# TPROXY/TUN. Existing conntrack mappings are left to expire normally.
+apply_nft_force_dns_redirect() {
+    [ "$FORCE_DNS_REDIRECT" = "true" ] || return 0
+
+    local dnsmasq_port
+    dnsmasq_port=$(uci get dhcp.@dnsmasq[0].port 2>/dev/null)
+    [ -n "$dnsmasq_port" ] || dnsmasq_port="53"
+    if [ "$dnsmasq_port" != "53" ]; then
+        warn "Forced DNS redirect is not applied: dnsmasq listens on port '$dnsmasq_port' instead of 53"
+        return 0
+    fi
+
+    nft add chain inet clash dns_redirect '{ type nat hook prerouting priority -101; policy accept; }'
+    nft add rule inet clash dns_redirect meta nfproto ipv4 meta l4proto udp ct original proto-dst 53 ct status dnat counter return comment "asclash-force-dns-existing-dnat"
+    nft add rule inet clash dns_redirect meta nfproto ipv4 meta l4proto tcp ct original proto-dst 53 ct status dnat counter return comment "asclash-force-dns-existing-dnat"
+    nft add rule inet clash dns_redirect iifname "clash-tun" meta nfproto ipv4 udp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+    nft add rule inet clash dns_redirect iifname "clash-tun" meta nfproto ipv4 tcp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+
+    local interfaces direct_src_cidrs iface src wan_interface
+    # Never expose a DNS redirect on the WAN, even if it was manually selected
+    # or WAN auto-detection is disabled for proxy processing.
+    wan_interface=$(get_wan_interface true)
+    if [ -n "$wan_interface" ]; then
+        nft add rule inet clash dns_redirect iifname "$wan_interface" meta nfproto ipv4 udp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+        nft add rule inet clash dns_redirect iifname "$wan_interface" meta nfproto ipv4 tcp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+    fi
+
+    if [ "$MODE" = "explicit" ]; then
+        interfaces=$(get_included_interfaces) || return 1
+        if is_ipcidr_whitelist_mode; then
+            direct_src_cidrs=$(extract_direct_src_ip_cidrs)
+            for iface in $interfaces; do
+                [ -n "$iface" ] || continue
+                [ "$iface" = "$wan_interface" ] && continue
+                for src in $direct_src_cidrs; do
+                    [ -n "$src" ] || continue
+                    nft add rule inet clash dns_redirect iifname "$iface" ip saddr "$src" meta nfproto ipv4 udp dport 53 counter return comment "asclash-force-dns-direct-source"
+                    nft add rule inet clash dns_redirect iifname "$iface" ip saddr "$src" meta nfproto ipv4 tcp dport 53 counter return comment "asclash-force-dns-direct-source"
+                done
+            done
+        fi
+        for iface in $interfaces; do
+            [ -n "$iface" ] || continue
+            nft add rule inet clash dns_redirect iifname "$iface" meta nfproto ipv4 udp dport 53 counter redirect to :53 comment "asclash-force-dns-udp"
+            nft add rule inet clash dns_redirect iifname "$iface" meta nfproto ipv4 tcp dport 53 counter redirect to :53 comment "asclash-force-dns-tcp"
+        done
+    else
+        interfaces=$(get_excluded_interfaces)
+        if [ -n "$wan_interface" ]; then
+            interfaces=$(printf '%s\n%s\n' "$interfaces" "$wan_interface" | grep -v '^$' | sort -u)
+        fi
+        for iface in $interfaces; do
+            [ "$iface" = "$wan_interface" ] && continue
+            [ -n "$iface" ] || continue
+            nft add rule inet clash dns_redirect iifname "$iface" meta nfproto ipv4 udp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+            nft add rule inet clash dns_redirect iifname "$iface" meta nfproto ipv4 tcp dport 53 counter return comment "asclash-force-dns-excluded-interface"
+        done
+        nft add rule inet clash dns_redirect meta nfproto ipv4 udp dport 53 counter redirect to :53 comment "asclash-force-dns-udp"
+        nft add rule inet clash dns_redirect meta nfproto ipv4 tcp dport 53 counter redirect to :53 comment "asclash-force-dns-tcp"
+    fi
+
+    FORCE_DNS_REDIRECT_ACTIVE="true"
+    msg "Forced client DNS redirect enabled for eligible interfaces (TCP/UDP 53 -> router dnsmasq)"
 }
 
 # For nftables - apply DHCP exclusion rules in mangle chain
@@ -3241,6 +3315,16 @@ apply_nft_rules() {
     nft add chain inet clash proxy '{ type filter hook prerouting priority -100; policy accept; }'
     nft add chain inet clash output '{ type route hook output priority mangle; policy accept; }'
     nft add chain inet clash CLASH_MARK
+    FORCE_DNS_REDIRECT_ACTIVE="false"
+    if [ "$FORCE_DNS_REDIRECT" = "true" ]; then
+        apply_nft_force_dns_redirect || { rollback_nft_rules "$nft_failure_file"; return 1; }
+    fi
+    if [ "$FORCE_DNS_REDIRECT_ACTIVE" = "true" ]; then
+        # DNS must not receive a TPROXY/TUN mark before the NAT redirect.
+        # Keep this first in CLASH_MARK so grouped and generic marks cannot win.
+        nft add rule inet clash CLASH_MARK meta nfproto ipv4 udp dport 53 return
+        nft add rule inet clash CLASH_MARK meta nfproto ipv4 tcp dport 53 return
+    fi
 
     # Exclude forwarded traffic (DNAT) from TPROXY to prevent conflicts.
     # This ensures that incoming connections for port forwarding are not hijacked
@@ -4178,6 +4262,12 @@ start() {
     # Load all settings once from the file
     load_all_settings_once
     preflight_check_tun_stack
+
+    if [ "$FORCE_DNS_REDIRECT" = "true" ] && ! hash nft 2>/dev/null; then
+        warn "Forced client DNS redirect requires nftables; refusing to start with the iptables backend"
+        set_list_progress "failed"
+        return 1
+    fi
 
     local server_ips fake_ip_config fake_ip_range fake_ip_filter_mode
     server_ips=$(extract_server_ips)

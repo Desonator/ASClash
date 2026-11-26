@@ -1310,3 +1310,33 @@ msgstr "当 fake-ip-filter-mode 为“whitelist”或“rule”时，nftables �
 msgid "This block is generated from IP-CIDR entries in AND rules, specified directly or through providers referenced by non-DIRECT rules. Entries are loaded into separate nftables IPv4 sets; port ranges and transport are preserved instead of expanding into IP/port pairs. It is refreshed on service start and every clash-rules update (every 30 minutes) only when the configuration, rules or provider data changes."
 msgstr "此区域由 AND 规则中的 IP-CIDR 条目生成，条目可直接指定，也可来自非 DIRECT 规则引用的 provider。条目载入独立的 nftables IPv4 集合；端口范围和传输协议会保留，不会展开为 IP/端口对。仅当配置、规则或 provider 数据发生变化时，才会在服务启动及每次 clash-rules 更新（每 30 分钟）时刷新。"
 
+msgid "Force client DNS through the router (TCP/UDP port 53)"
+msgstr "强制客户端 DNS 经由路由器（TCP/UDP 53 端口）"
+
+msgid "Redirects client DNS from ASClash-processed interfaces to the router resolver (dnsmasq must listen on port 53). Router-originated requests, WAN ingress and excluded interfaces are not intercepted. In Explicit mode with Fake-IP whitelist/rule, SRC-IP-CIDR DIRECT sources are exempt from this redirect. Devices already using router DNS via DHCP still use dnsmasq shared upstream; per-client DNS upstreams are not configured. New port-53 flows take precedence over later firewall redirects. DoT/DoH are not blocked."
+msgstr "将 ASClash 处理接口上的客户端 DNS 请求重定向到路由器解析器（dnsmasq 必须监听 53 端口）。路由器自身请求、WAN 入站流量和被排除接口不会拦截。在 Explicit 模式且使用 Fake-IP whitelist/rule 时，SRC-IP-CIDR DIRECT 来源不受此重定向影响。已通过 DHCP 使用路由器 DNS 的设备仍使用 dnsmasq 共享上游；不会为每个客户端单独设置 DNS 上游。新建的 53 端口连接优先于后续 firewall 重定向规则。不阻止 DoT/DoH。"
+
+msgid "Forced DNS"
+msgstr "强制 DNS"
+
+msgid "Active"
+msgstr "已启用"
+
+msgid "Service stopped"
+msgstr "服务已停止"
+
+msgid "Rules missing"
+msgstr "缺少规则"
+
+msgid "Redirected conntrack flows: UDP %d · TCP %d"
+msgstr "已重定向的 conntrack 流：UDP %d · TCP %d"
+
+msgid "Bypassed flows: excluded interfaces %d · DIRECT sources %d · existing DNAT %d"
+msgstr "已绕过的流：排除接口 %d · DIRECT 来源 %d · 已有 DNAT %d"
+
+msgid "Check dnsmasq port 53, the dns_redirect chain and the system log."
+msgstr "请检查 dnsmasq 的 53 端口、dns_redirect 链和系统日志。"
+
+msgid "Forced DNS redirect rules (TCP/UDP 53)"
+msgstr "强制 DNS 重定向规则（TCP/UDP 53）"
+

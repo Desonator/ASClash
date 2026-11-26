@@ -68,6 +68,43 @@ function parseWhitelistSummary(text) {
 	return { providers, total: match ? Number(match[1]) : providers.reduce((sum, row) => sum + row.count, 0) };
 }
 
+function parseForcedDnsCounters(redirectChainText) {
+	const result = {
+		udp: { rules: 0, flows: 0, bytes: 0 },
+		tcp: { rules: 0, flows: 0, bytes: 0 },
+		excludedInterfaces: { flows: 0, bytes: 0 },
+		directSources: { flows: 0, bytes: 0 },
+		existingDnat: { flows: 0, bytes: 0 }
+	};
+	function counterFor(line) {
+		const counter = line.match(/counter\s+packets\s+(\d+)\s+bytes\s+(\d+)/i);
+		return counter ? { packets: Number(counter[1]) || 0, bytes: Number(counter[2]) || 0 } : { packets: 0, bytes: 0 };
+	}
+	for (const line of String(redirectChainText || '').split(/\r?\n/)) {
+		const match = line.match(/asclash-force-dns-(udp|tcp|excluded-interface|direct-source|existing-dnat)/);
+		if (!match) continue;
+		const counter = counterFor(line);
+		if (match[1] === 'udp' || match[1] === 'tcp') {
+			const item = result[match[1]];
+			item.rules++;
+			item.flows += counter.packets;
+		} else {
+			const key = match[1] === 'excluded-interface' ? 'excludedInterfaces'
+				: match[1] === 'direct-source' ? 'directSources' : 'existingDnat';
+			result[key].flows += counter.packets;
+			result[key].bytes += counter.bytes;
+		}
+	}
+	return result;
+}
+
+function formatForcedDnsCounters(counters) {
+	return [
+		_('Redirected conntrack flows: UDP %d · TCP %d').format(counters.udp.flows, counters.tcp.flows),
+		_('Bypassed flows: excluded interfaces %d · DIRECT sources %d · existing DNAT %d').format(counters.excludedInterfaces.flows, counters.directSources.flows, counters.existingDnat.flows)
+	].join(' · ');
+}
+
 function readYamlScalar(text, key) {
 	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	const match = String(text || '').match(new RegExp('^' + escaped + ':\\s*(.*?)\\s*$', 'm'));
@@ -253,7 +290,7 @@ function listSection(title, state, statusText, metrics, note) {
 return view.extend({
 	load: async function() {
 		const paths = Object.values(FILES);
-		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelProcess, whitelistSet, markChain] = await Promise.all([
+		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelProcess, whitelistSet, markChain, dnsRedirect] = await Promise.all([
 			Promise.all(paths.map(read)),
 			command('/usr/sbin/nft', ['list', 'chains', 'inet']),
 			command('/sbin/ip', ['rule', 'show']),
@@ -264,15 +301,16 @@ return view.extend({
 			view_asclash_utils.getClashRunning().catch(() => null),
 			checkKernelRunning(),
 			command('/usr/sbin/nft', ['list', 'set', 'inet', 'clash', 'fakeip_whitelist']),
-			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'CLASH_MARK'])
+			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'CLASH_MARK']),
+			command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'dns_redirect'])
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
 		const api = await checkMihomoApi(files[FILES.config]);
-		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, api, checkedAt: new Date().toLocaleString() };
+		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, dnsRedirect, api, checkedAt: new Date().toLocaleString() };
 	},
 
 	render: function(data) {
-		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, api, checkedAt } = data;
+		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, dnsRedirect, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
 		const progressFields = String(files[FILES.listProgress] || '').trim().split('|');
@@ -287,6 +325,17 @@ return view.extend({
 		const skipped = parserReportAvailable ? parserReport.filter(row => row[0] === 'skipped') : [];
 		const modeMatch = String(files[FILES.settings] || '').match(/^PROXY_MODE=(\S+)/m);
 		const proxyMode = modeMatch ? modeMatch[1].toLowerCase() : 'unknown';
+		const forceDnsEnabled = /^FORCE_DNS_REDIRECT=true\s*$/mi.test(files[FILES.settings] || '');
+		const forceDnsCounters = parseForcedDnsCounters(dnsRedirect.output);
+		const forceDnsRulesActive = forceDnsCounters.udp.rules > 0 && forceDnsCounters.tcp.rules > 0;
+		const forceDnsState = !forceDnsEnabled ? _('Disabled')
+			: serviceRunning === false ? _('Service stopped')
+			: forceDnsRulesActive ? _('Active') : _('Rules missing');
+		const forceDnsStatusPill = !forceDnsEnabled || serviceRunning === false
+			? statePill('unknown', forceDnsState)
+			: statusPill(forceDnsRulesActive, forceDnsState);
+		forceDnsStatusPill.id = 'asclash-force-dns-status';
+		const forceDnsCounterText = E('span', { 'id': 'asclash-force-dns-counters' }, forceDnsEnabled ? formatForcedDnsCounters(forceDnsCounters) : '');
 		const hasClashTable = nft.ok && /table\s+inet\s+clash\b/i.test(nft.output);
 		const nftOk = hasClashTable && /chain\s+mangle\b/i.test(nft.output) && /chain\s+proxy\b/i.test(nft.output) && /chain\s+CLASH_MARK\b/i.test(nft.output);
 		const tproxyRule = /fwmark\s+0x0*1\s+.*lookup\s+100/i.test(rules.output);
@@ -316,9 +365,14 @@ return view.extend({
 				E('span', {}, [E('strong', {}, _('Clash service')), ' ', serviceRunning == null ? statePill('unknown') : statusPill(serviceRunning, serviceRunning ? _('Running') : _('Stopped'))]),
 				E('span', {}, [E('strong', {}, _('Mihomo API')), ' ', statePill(api.state)]),
 				E('span', {}, [E('strong', {}, _('nftables integration')), ' ', statusPill(nftOk, _('Present'), _('Missing / unreadable'))]),
-				E('span', {}, [E('strong', {}, _('Network mode')), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))])
+				E('span', {}, [E('strong', {}, _('Network mode')), ' ', statusPill(routingOk, routingOk ? _('Consistent') : _('Mismatch'))]),
+				E('span', {}, [E('strong', {}, _('Forced DNS')), ' ', forceDnsStatusPill])
 			]),
-			E('p', { 'class': 'cbi-section-descr', 'style': 'text-align:left;line-height:16px;margin:6px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail])
+			E('p', { 'class': 'cbi-section-descr', 'style': 'text-align:left;line-height:16px;margin:6px 0 0;' }, [_('Read-only check. It does not restart the service or modify firewall and routing state. Last checked: %s').format(checkedAt), ' ', api.detail]),
+			forceDnsEnabled ? E('p', { 'class': 'cbi-section-descr', 'style': 'text-align:left;line-height:16px;margin:5px 0 0;' }, [
+				forceDnsCounterText,
+				!forceDnsRulesActive && serviceRunning !== false ? ` — ${_('Check dnsmasq port 53, the dns_redirect chain and the system log.')}` : ''
+			]) : null
 		]);
 
 		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
@@ -404,6 +458,7 @@ return view.extend({
 				E('h4', {}, _('Routing table 100')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, route100.output || route100.error || _('Empty')),
 				E('h4', {}, _('Routing table 101')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, route101.output || route101.error || _('Empty')),
 				E('h4', {}, _('TUN interface')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;' }, tunLink.output || tunLink.error || _('Not present')),
+				E('h4', {}, _('Forced DNS redirect rules (TCP/UDP 53)')), E('pre', { 'style': 'text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;' }, dnsRedirect.output || dnsRedirect.error || _('No output')),
 				(proxyMode === 'tun' || proxyMode === 'mixed' ? E('p', { 'class': 'cbi-section-descr' }, _('On a virtual TUN interface, state UNKNOWN alone is not an error. Check the UP flag and active route as well.')) : null)
 			].filter(Boolean))
 		].filter(Boolean)));
@@ -444,11 +499,23 @@ return view.extend({
 			polling = true;
 			let reload = false;
 			try {
-				const [currentService, currentKernel, currentReport] = await Promise.all([
+				const [currentService, currentKernel, currentReport, currentDnsRedirect] = await Promise.all([
 					view_asclash_utils.getClashRunning().catch(() => null),
 					checkKernelRunning(),
-					read(FILES.listDiagnostics)
+					read(FILES.listDiagnostics),
+					forceDnsEnabled ? command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'dns_redirect']) : Promise.resolve(null)
 				]);
+				if (forceDnsEnabled && currentDnsRedirect) {
+					const liveCounters = parseForcedDnsCounters(currentDnsRedirect.output);
+					const liveActive = currentDnsRedirect.ok && liveCounters.udp.rules > 0 && liveCounters.tcp.rules > 0;
+					const livePill = root.querySelector('#asclash-force-dns-status');
+					const liveCounterText = root.querySelector('#asclash-force-dns-counters');
+					if (livePill) {
+						livePill.textContent = currentService === false ? _('Service stopped') : liveActive ? _('Active') : _('Rules missing');
+						livePill.style.backgroundColor = currentService === false ? '#667085' : liveActive ? '#198754' : '#b42336';
+					}
+					if (liveCounterText) liveCounterText.textContent = formatForcedDnsCounters(liveCounters);
+				}
 				const reportText = String(currentReport || '');
 				if (reportText !== lastReport) {
 					const nextPhase = parseListDiagnostics(reportText).cycle.phase;

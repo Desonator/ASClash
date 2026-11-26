@@ -435,6 +435,7 @@ async function loadSettings() {
             autoDetectLan: true,
             autoDetectWan: true,
             blockQuic: true,
+            forceDnsRedirect: false,
             useTmpfsRules: true,
             showSmartWeights: true,
             detectedLan: '',
@@ -460,6 +461,7 @@ async function loadSettings() {
                 case 'AUTO_DETECT_LAN': settings.autoDetectLan = value === 'true'; break;
                 case 'AUTO_DETECT_WAN': settings.autoDetectWan = value === 'true'; break;
                 case 'BLOCK_QUIC': settings.blockQuic = value === 'true'; break;
+                case 'FORCE_DNS_REDIRECT': settings.forceDnsRedirect = value === 'true'; break;
                 case 'USE_TMPFS_RULES': settings.useTmpfsRules = value === 'true'; break;
                 case 'SHOW_SMART_WEIGHTS': settings.showSmartWeights = value !== 'false'; break;
                 case 'DETECTED_LAN': settings.detectedLan = value; break;
@@ -495,6 +497,7 @@ async function loadSettings() {
             autoDetectLan: true,
             autoDetectWan: true,
             blockQuic: true,
+            forceDnsRedirect: false,
             useTmpfsRules: true,
             showSmartWeights: true,
             detectedLan: '',
@@ -526,7 +529,7 @@ async function loadInterfacesByMode(mode) {
     }
 }
 
-async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, useTmpfsRules, showSmartWeights, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS, mihomoReleaseRepo) {
+async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, forceDnsRedirect, useTmpfsRules, showSmartWeights, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS, mihomoReleaseRepo) {
     try {
         let detectedLan = '';
         let detectedWan = '';
@@ -556,6 +559,7 @@ TUN_STACK=${tunStack}
 AUTO_DETECT_LAN=${autoDetectLan}
 AUTO_DETECT_WAN=${autoDetectWan}
 BLOCK_QUIC=${blockQuic}
+FORCE_DNS_REDIRECT=${forceDnsRedirect}
 USE_TMPFS_RULES=${useTmpfsRules}
 SHOW_SMART_WEIGHTS=${showSmartWeights}
 DETECTED_LAN=${detectedLan}
@@ -1518,7 +1522,7 @@ function createInterfaceSelector(interfaces, selectedInterfaces, currentMode) {
     return container;
 }
 
-function createAdditionalSettings(blockQuic, useTmpfsRules, showSmartWeights, enableHwid, hwidUserAgent, hwidDeviceOS) {
+function createAdditionalSettings(blockQuic, forceDnsRedirect, useTmpfsRules, showSmartWeights, enableHwid, hwidUserAgent, hwidDeviceOS) {
     const container = E('div', { 'class': 'cbi-section' });
 
     container.appendChild(E('h3', _('Additional Settings')));
@@ -1549,6 +1553,23 @@ function createAdditionalSettings(blockQuic, useTmpfsRules, showSmartWeights, en
     ]);
 
     settingsContainer.appendChild(blockQuicLabel);
+
+    const forceDnsCheckbox = E('input', {
+        'type': 'checkbox',
+        'id': 'force_dns_redirect'
+    });
+    const forceDnsLabel = E('label', {
+        'for': 'force_dns_redirect',
+        'style': cardStyle
+    }, [
+        E('span', { 'style': cardHeaderStyle }, [
+            forceDnsCheckbox,
+            E('span', '🔒 ' + _('Force client DNS through the router (TCP/UDP 53)'))
+        ]),
+        E('span', { 'style': cardDescStyle },
+            _('Redirects client DNS from ASClash-processed interfaces to the router resolver (dnsmasq must listen on port 53). Router-originated requests, WAN ingress and excluded interfaces are not intercepted. In Explicit mode with Fake-IP whitelist/rule, SRC-IP-CIDR DIRECT sources are exempt from this redirect. Devices already using router DNS via DHCP still use dnsmasq shared upstream; per-client DNS upstreams are not configured. New port-53 flows take precedence over later firewall redirects. DoT/DoH are not blocked.'))
+    ]);
+    settingsContainer.appendChild(forceDnsLabel);
 
     const tmpfsCheckbox = E('input', {
         'type': 'checkbox',
@@ -1588,6 +1609,7 @@ function createAdditionalSettings(blockQuic, useTmpfsRules, showSmartWeights, en
 
     setTimeout(() => {
         blockQuicCheckbox.checked = blockQuic;
+        forceDnsCheckbox.checked = forceDnsRedirect;
         tmpfsCheckbox.checked = useTmpfsRules;
         smartWeightsCheckbox.checked = showSmartWeights;
     }, 0);
@@ -1815,6 +1837,7 @@ return view.extend({
         const interfaceSelector = createInterfaceSelector(interfaces, selectedInterfaces, settings.mode);
         const additionalSettings = createAdditionalSettings(
             settings.blockQuic,
+            settings.forceDnsRedirect,
             settings.useTmpfsRules,
             settings.showSmartWeights,
             settings.enableHwid,
@@ -1919,6 +1942,7 @@ return view.extend({
                 const autoDetectLan = autoDetectOptions.querySelector('#auto_detect_lan').checked;
                 const autoDetectWan = autoDetectOptions.querySelector('#auto_detect_wan').checked;
                 const blockQuic = additionalSettings.querySelector('#block_quic').checked;
+                const forceDnsRedirect = additionalSettings.querySelector('#force_dns_redirect').checked;
                 const useTmpfsRules = additionalSettings.querySelector('#use_tmpfs_rules')?.checked ?? true;
                 const showSmartWeights = additionalSettings.querySelector('#show_smart_weights')?.checked ?? true;
                 const enableHwid = additionalSettings.querySelector('#enable_hwid')?.checked || false;
@@ -1938,6 +1962,7 @@ return view.extend({
                     autoDetectLan,
                     autoDetectWan,
                     blockQuic,
+                    forceDnsRedirect,
                     useTmpfsRules,
                     showSmartWeights,
                     selected,

@@ -17,6 +17,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Diagnostics | A separate page checks service and core state, local Mihomo API availability, and consistency between the configured network mode and nftables, `ip rule`, routes and the TUN interface. Checks are read-only. |
 | Rule-list status | Shows the latest list-generation cycle, states and counters for plain IP-CIDR and grouped AND lists, parser/provider issues, and whether the previous list was retained while provider files were unavailable. Historical log messages remain separately expandable. |
 | Fake-IP IP-CIDR | Builds an IPv4 list from referenced rule providers and supported inline rules. LuCI shows per-provider counts and an FAQ; manual entries outside the generated block are preserved. |
+| Forced DNS | Redirects client IPv4 TCP/UDP requests to router port 53 and reports active rules and conntrack-flow counters in Diagnostics. It follows interface-processing scope and exempts DIRECT sources. |
 | Grouped AND rules | Supported `AND` rules are translated into IPv4 nftables sets and compact protocol/port rules. Matching sources/sets can be reused while TCP/UDP and port conditions stay separate. |
 | Smart groups | An optional Status-page widget displays servers and weights for `type: smart` groups when the selected core exposes the required API. |
 | Kernel source | Choose official Mihomo, Prizrak-Core, or another compatible GitHub release repository. Router architecture is detected automatically. |
@@ -97,7 +98,7 @@ Available network modes:
 
 For TUN/MIXED, ASClash configures policy routing and watches for `clash-tun`. The TUN stack (`system`, `gvisor` or `mixed`) is selected in the Mihomo configuration; availability depends on the chosen core.
 
-Additional settings include QUIC blocking (reject UDP/443), placing rule sets and proxy providers in RAM (`tmpfs`), adding HWID headers to proxy-provider requests (Remnawave compatibility; header values are configurable), and showing Smart-group weights on the Status page.
+Additional settings include QUIC blocking (reject UDP/443), forced client DNS redirection (IPv4 TCP/UDP 53), placing rule sets and proxy providers in RAM (`tmpfs`), adding HWID headers to proxy-provider requests (Remnawave compatibility; header values are configurable), and showing Smart-group weights on the Status page.
 
 ### Kernel management
 
@@ -128,6 +129,14 @@ With `fake-ip-filter-mode: whitelist`, Mihomo returns Fake-IP addresses only for
 For a domain resolved to a real IP, the firewall cannot infer the original domain from an arbitrary DNS answer. That traffic reaches Mihomo only if it matches an IP-CIDR set or another interception rule; otherwise it may bypass the core. This is particularly important for domain rules that return `real-ip`.
 
 `redir-host` does not use a Fake-IP range. Interception follows the interface mode and firewall policy; domain rules need domain information available to the core, for example through sniffing.
+
+### Forced DNS redirection
+
+The **Force client DNS through the router** option intercepts new IPv4 TCP and UDP requests to port 53 and redirects them to the router's local DNS resolver (dnsmasq, which must listen on the standard port 53). While the ASClash service is running, dnsmasq uses the upstream configured by ASClash for Mihomo. This also catches requests sent to manually configured resolvers such as `8.8.8.8:53`.
+
+The redirect follows interface scope: **Explicit** applies only to selected interfaces; **Exclude** applies to all interfaces except excluded ones. WAN ingress, router-originated DNS and the `clash-tun` interface are not redirected. In Explicit mode with Fake-IP `whitelist`/`rule`, sources matching a simple `SRC-IP-CIDR,...,DIRECT` rule are exempt from this firewall redirect. This option does not create a per-device DNS upstream: clients already using the router DNS from DHCP continue to use dnsmasq's shared upstream.
+
+New port-53 requests are redirected before ordinary firewall redirect rules; already-established conntrack DNAT flows keep their prior destination until the state expires. The option is active only while ASClash is running and **does not block DoT/DoH**. DoT uses a separate port; DoH resembles HTTPS and requires a separate policy. Diagnostics shows active nftables rules and conntrack-flow counters, not a count of every DNS query. If dnsmasq is configured to listen on a non-standard DNS port, ASClash does not apply forced DNS rather than redirecting clients to an unbound port.
 
 > External DNS, browser DoH/DoT and device-specific DNS clients can bypass router DNS settings. Receiving a real IP does not guarantee that Mihomo can apply a domain rule to the connection.
 
