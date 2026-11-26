@@ -1,9 +1,9 @@
 #!/bin/sh
 # Part of the ASClash package — installed to /etc/hotplug.d/net/99-clash-tun
 #
-# Reacts to mihomo creating the clash-tun device (ACTION=add) and immediately
-# installs the ip route pointing to it. This is faster than waiting for the
-# 30 s poll in service_started() and covers the normal startup path.
+# Reacts to clash-tun creation/removal. On add it immediately installs the
+# TUN route; on remove it restores fail-closed routes so marks cannot fall
+# through to the main table while the core recreates its tunnel.
 
 [ -x /opt/clash/bin/clash-rules ] || exit 0
 
@@ -12,5 +12,9 @@ case "$ACTION" in
         [ "$INTERFACE" = "clash-tun" ] || exit 0
         /opt/clash/bin/clash-rules tun_route_setup
         /opt/clash/bin/clash-rules repair_policy
+        ;;
+    remove)
+        [ "$INTERFACE" = "clash-tun" ] || exit 0
+        /opt/clash/bin/clash-rules tun_route_fallback
         ;;
 esac

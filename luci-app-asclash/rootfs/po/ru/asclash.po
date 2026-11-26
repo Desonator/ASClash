@@ -4,8 +4,14 @@
 #
 msgid ""
 msgstr ""
+"Project-Id-Version: ASClash 4.8\n"
+"PO-Revision-Date: 2026-11-26 00:00+0000\n"
+"Last-Translator: ASClash contributors\n"
+"Language-Team: Russian\n"
 "Language: ru\n"
+"MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 ### Строки меню ###
@@ -724,6 +730,15 @@ msgstr "Перезагрузка конфига не удалась (%s, HTTP %s
 msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)"
 msgstr "(Подсказка: системный curl не поддерживает HTTPS. Установите пакет curl-ssl или используйте обычный external-controller для перезагрузки конфига.)"
 
+msgid "Config reload failed (HTTP %s). %s %s Try \"Save & Restart core\" for a full restart."
+msgstr "Перезагрузка конфига не удалась (HTTP %s). %s %s Попробуйте «Сохранить и перезапустить ядро» для полного перезапуска."
+
+msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl.)"
+msgstr "(Подсказка: системный curl не поддерживает HTTPS. Установите curl-ssl.)"
+
+msgid "The API controller must use a loopback address for safe local reload."
+msgstr "Для безопасной локальной перезагрузки контроллер API должен использовать loopback-адрес."
+
 msgid "Config reloaded, but updating subscription IP cache failed: %s"
 msgstr "Конфиг перезагружен, но обновление кеша IP подписок не удалось: %s"
 
@@ -915,6 +930,12 @@ msgstr "Для этой Smart-группы пока нет данных о ве�
 
 msgid "Smart API controller is not configured."
 msgstr "В конфигурации не задан адрес API контроллера Smart."
+
+msgid "Mihomo API controller must be bound to loopback."
+msgstr "Контроллер API Mihomo должен быть привязан к loopback-интерфейсу."
+
+msgid "Smart weights are not supported by this Mihomo core."
+msgstr "Это ядро Mihomo не поддерживает получение весов Smart-групп."
 
 msgid "Summary statistics were stale; total was recovered from the generated AUTO block."
 msgstr "Статистика summary-файла устарела; общее число восстановлено по AUTO-блоку списка."
@@ -1512,4 +1533,46 @@ msgstr "Пока страница была открыта, DHCP-резервац
 
 msgid "Could not re-check DHCP reservations; settings were not saved."
 msgstr "Не удалось повторно проверить DHCP-резервации; настройки не сохранены."
+
+msgid "Failed to stop Clash before replacing the kernel."
+msgstr "Не удалось остановить Clash перед заменой ядра."
+
+msgid "Could not confirm that the Clash service stopped; the kernel was not replaced."
+msgstr "Не удалось подтвердить остановку службы Clash; ядро не заменено."
+
+msgid "Failed to preserve the previous kernel binary"
+msgstr "Не удалось сохранить предыдущий файл ядра"
+
+msgid "Kernel was installed, but the previous binary backup could not be removed: %s"
+msgstr "Ядро установлено, но резервную копию предыдущего файла удалить не удалось: %s"
+
+msgid "Could not remove the failed kernel binary."
+msgstr "Не удалось удалить неисправный файл ядра."
+
+msgid "Could not restore the previous kernel binary; backup remains at %s."
+msgstr "Не удалось восстановить предыдущий файл ядра; резервная копия осталась в %s."
+
+msgid "Previous Clash service could not be restarted."
+msgstr "Не удалось снова запустить прежнюю службу Clash."
+
+msgid "Previous Clash service could not be restarted: %s"
+msgstr "Не удалось снова запустить прежнюю службу Clash: %s"
+
+msgid "Failed to restore previous config.yaml: %s"
+msgstr "Не удалось восстановить предыдущий config.yaml: %s"
+
+msgid "Another kernel installation is already running."
+msgstr "Установка ядра уже выполняется."
+
+msgid "Could not release the kernel installation lock; remove %s before retrying."
+msgstr "Не удалось снять блокировку установки ядра; удалите %s перед повторной попыткой."
+
+msgid "The reload outcome is unknown because no HTTP response was received. The new config remains saved; restart Clash to synchronize the running core."
+msgstr "Результат перезагрузки неизвестен: HTTP-ответ не получен. Новая конфигурация сохранена; перезапустите Clash, чтобы синхронизировать работающее ядро."
+
+msgid "Firewall is not active; provider-derived firewall lists will be refreshed when Clash starts."
+msgstr "Firewall ещё не активен; списки на основе provider-ов будут обновлены после запуска Clash."
+
+msgid "Firewall is not active; list refresh is deferred until Clash starts"
+msgstr "Firewall ещё не активен; обновление списков отложено до запуска Clash"
 

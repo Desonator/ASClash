@@ -156,22 +156,87 @@ async function updateRuntimeBadges(serviceBadge, kernelBadge) {
 }
 
 async function installKernel(url) {
-	const path = '/tmp/asclash-kernel.gz';
-	const extracted = '/tmp/asclash-kernel';
+	const token = Date.now() + '-' + Math.random().toString(36).slice(2);
+	const path = '/tmp/mihomo-kernel-' + token + '.gz';
+	const extracted = '/tmp/mihomo-kernel-' + token;
+	const installLock = '/tmp/mihomo-kernel-install.lock';
 	const target = '/opt/clash/bin/clash';
-	ui.addNotification(null, E('p', _('Downloading Mihomo kernel...')), 'info');
-	const curl = await fs.exec('curl', ['-fL', '--retry', '2', '--connect-timeout', '15', '--max-time', '300', url, '-o', path]);
-	if (curl.code !== 0) throw new Error((curl.stderr || '').trim() || _('Download failed'));
-	const extract = await fs.exec('gzip', ['-df', path]);
-	if (extract.code !== 0) throw new Error((extract.stderr || '').trim() || _('Extraction failed'));
-	await fs.exec('/etc/init.d/clash', ['stop']).catch(() => {});
-	const move = await fs.exec('mv', ['-f', extracted, target]);
-	if (move.code !== 0) throw new Error((move.stderr || '').trim() || _('Failed to install new binary'));
-	const chmod = await fs.exec('chmod', ['0755', target]);
-	if (chmod.code !== 0) throw new Error((chmod.stderr || '').trim() || _('Failed to set executable permissions'));
-	const verify = await fs.exec(target, ['-v']);
-	if (verify.code !== 0) throw new Error(_('Installed binary failed its version check'));
-	ui.addNotification(null, E('p', _('Kernel installed. The Clash service was stopped; restart it to activate the new version.')), 'info');
+	const backup = target + '.backup-' + token;
+	const lockResult = await fs.exec('/bin/mkdir', [installLock]);
+	if (lockResult.code !== 0) throw new Error(_('Another kernel installation is already running.'));
+	let hadPreviousBinary = false;
+	let serviceWasRunning = false;
+	let backupCreated = false;
+	let newBinaryInstalled = false;
+	try {
+		hadPreviousBinary = !!await L.resolveDefault(fs.stat(target), null);
+		serviceWasRunning = await view_asclash_utils.getClashRunning();
+		ui.addNotification(null, E('p', _('Downloading Mihomo kernel...')), 'info');
+		const curl = await fs.exec('curl', ['-fL', '--retry', '2', '--connect-timeout', '15', '--max-time', '300', url, '-o', path]);
+		if (curl.code !== 0) throw new Error((curl.stderr || '').trim() || _('Download failed'));
+		const extract = await fs.exec('gzip', ['-df', path]);
+		if (extract.code !== 0) throw new Error((extract.stderr || '').trim() || _('Extraction failed'));
+		const chmodStaged = await fs.exec('chmod', ['0755', extracted]);
+		if (chmodStaged.code !== 0) throw new Error((chmodStaged.stderr || '').trim() || _('Failed to set executable permissions'));
+
+		const stop = await fs.exec('/etc/init.d/clash', ['stop']);
+		if (stop.code !== 0) throw new Error((stop.stderr || '').trim() || _('Failed to stop Clash before replacing the kernel.'));
+		if (!(await view_asclash_utils.waitForServiceStatus(view_asclash_utils.getClashRunning, false, 30000)))
+			throw new Error(_('Could not confirm that the Clash service stopped; the kernel was not replaced.'));
+
+		if (hadPreviousBinary) {
+			const moveOld = await fs.exec('/bin/mv', ['-f', target, backup]);
+			if (moveOld.code !== 0) throw new Error((moveOld.stderr || '').trim() || _('Failed to preserve the previous kernel binary'));
+			backupCreated = true;
+		}
+
+		const moveNew = await fs.exec('/bin/mv', ['-f', extracted, target]);
+		if (moveNew.code !== 0) throw new Error((moveNew.stderr || '').trim() || _('Failed to install new binary'));
+		newBinaryInstalled = true;
+		const verify = await fs.exec(target, ['-v']);
+		if (verify.code !== 0) throw new Error(_('Installed binary failed its version check'));
+
+		if (backupCreated) {
+			const removeBackup = await fs.exec('/bin/rm', ['-f', backup]);
+			if (removeBackup.code === 0) backupCreated = false;
+			else ui.addNotification(null, E('p', _('Kernel was installed, but the previous binary backup could not be removed: %s').format(backup)), 'warning');
+		}
+		ui.addNotification(null, E('p', _('Kernel installed. The Clash service was stopped; restart it to activate the new version.')), 'info');
+	} catch (e) {
+		const recoveryErrors = [];
+		if (newBinaryInstalled) {
+			const removeNew = await fs.exec('/bin/rm', ['-f', target]);
+			if (removeNew.code !== 0) recoveryErrors.push(_('Could not remove the failed kernel binary.'));
+		} else if (!hadPreviousBinary && !backupCreated) {
+			// A cross-filesystem mv may fail after creating a partial destination.
+			await fs.exec('/bin/rm', ['-f', target]);
+		}
+		if (backupCreated) {
+			const restoreOld = await fs.exec('/bin/mv', ['-f', backup, target]);
+			if (restoreOld.code === 0) backupCreated = false;
+			else recoveryErrors.push(_('Could not restore the previous kernel binary; backup remains at %s.').format(backup));
+		}
+		if (serviceWasRunning && !await view_asclash_utils.getClashRunning() && (!hadPreviousBinary || !backupCreated)) {
+			try {
+				await view_asclash_utils.execDetached('/etc/init.d/clash start');
+				if (!(await view_asclash_utils.waitForServiceStatus(view_asclash_utils.getClashRunning, true, 30000)))
+					recoveryErrors.push(_('Previous Clash service could not be restarted.'));
+			} catch (restartError) {
+				recoveryErrors.push(_('Previous Clash service could not be restarted: %s').format(restartError.message || String(restartError)));
+			}
+		}
+		if (recoveryErrors.length) e.message = (e.message || String(e)) + ' ' + recoveryErrors.join(' ');
+		throw e;
+	} finally {
+		try { await fs.exec('/bin/rm', ['-f', path, extracted]); } catch (_e) {}
+		try {
+			const unlock = await fs.exec('/bin/rm', ['-rf', installLock]);
+			if (unlock.code !== 0)
+				ui.addNotification(null, E('p', _('Could not release the kernel installation lock; remove %s before retrying.').format(installLock)), 'warning');
+		} catch (_e) {
+			ui.addNotification(null, E('p', _('Could not release the kernel installation lock; remove %s before retrying.').format(installLock)), 'warning');
+		}
+	}
 }
 
 async function readRepository() {

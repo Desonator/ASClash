@@ -812,6 +812,7 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
         const previousSettings = await L.resolveDefault(fs.read('/opt/clash/settings'), '');
         let configStage = null;
         const configContent = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+        const previousConfig = configContent;
         if (Array.isArray(managedDirectIPs) && managedDirectIPs.length && !configContent)
             throw new Error(_('Cannot add device-direct rules because config.yaml is empty.'));
         if (configContent) {
@@ -852,6 +853,13 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
         } catch (e) {
             if (configStage)
                 await view_asclash_utils.discardStagedConfig(configStage.path);
+            if (configStage && previousConfig !== null) {
+                try {
+                    await view_asclash_utils.writeFileAtomic('/opt/clash/config.yaml', previousConfig);
+                } catch (rollbackError) {
+                    e.message += '; ' + _('Failed to restore previous config.yaml: %s').format(rollbackError.message || String(rollbackError));
+                }
+            }
             try {
                 await view_asclash_utils.writeFileAtomic('/opt/clash/settings', previousSettings);
             } catch (rollbackError) {

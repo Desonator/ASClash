@@ -75,6 +75,7 @@ ASCLASH_FAKEIP_FALLBACK="false"
 ASCLASH_FAKEIP_ISSUES=""
 ASCLASH_GROUPED_STATE="unknown"
 ASCLASH_GROUPED_FALLBACK="false"
+ASCLASH_UPDATE_DEFERRED="false"
 AUTO_FAKEIP_ISSUES=""
 AUTO_FAKEIP_DEFER_MISSING="false"
 FAKEIP_REFRESH_STATE="ready"
@@ -88,6 +89,8 @@ readonly FAKEIP_AUTO_END="# AUTO-END"
 # During nftables setup, remember failures even when an individual helper runs
 # in a pipeline subshell or historically ignored a command status.
 NFT_FAILURE_TRACKER=""
+NFT_PREVIOUS_TABLE_SNAPSHOT=""
+NFT_PREVIOUS_TUN_FORWARD="false"
 nft() {
     command nft "$@"
     local rc=$?
@@ -3057,10 +3060,33 @@ teardown_iptables_tun_forward_rules() {
 # Roll back an incomplete nftables build. Removing the partially constructed
 # table is safer than reporting success with only some chains/rules installed.
 rollback_nft_rules() {
+    local restore_policy="${2:-false}"
+    local previous_snapshot="$NFT_PREVIOUS_TABLE_SNAPSHOT"
+    local previous_restored="false"
     NFT_FAILURE_TRACKER=""
     [ -n "$1" ] && rm -f "$1"
     teardown_nft_tun_forward_rules
     command nft delete table inet clash 2>/dev/null
+    if [ -n "$previous_snapshot" ] && [ -s "$previous_snapshot" ]; then
+        if command nft -f "$previous_snapshot"; then
+            previous_restored="true"
+            msg "Restored the previous inet clash ruleset after the failed rebuild"
+            if [ "$NFT_PREVIOUS_TUN_FORWARD" = "true" ]; then
+                local current_proxy_mode="$PROXY_MODE"
+                PROXY_MODE="mixed"
+                apply_nft_tun_forward_rules
+                PROXY_MODE="$current_proxy_mode"
+            fi
+            if [ "$restore_policy" = "true" ]; then
+                setup_routing_rules || warn "Could not restore policy routes after restoring the previous firewall table"
+            fi
+        else
+            warn "CRITICAL: Failed to restore the previous inet clash ruleset; snapshot preserved at $previous_snapshot"
+        fi
+    fi
+    [ "$previous_restored" != "true" ] || rm -f "$previous_snapshot"
+    NFT_PREVIOUS_TABLE_SNAPSHOT=""
+    NFT_PREVIOUS_TUN_FORWARD="false"
     return 1
 }
 
@@ -3073,6 +3099,25 @@ apply_nft_rules() {
     local server_ips="$1"
     local fake_ip_range="$2"
     local fake_ip_filter_mode="$3"
+	local previous_snapshot="/tmp/clash/inet_clash_previous.$$"
+	NFT_PREVIOUS_TABLE_SNAPSHOT=""
+	NFT_PREVIOUS_TUN_FORWARD="false"
+	mkdir -p /tmp/clash || return 1
+	if command nft list table inet clash >/dev/null 2>&1; then
+		if ! command nft list table inet clash > "$previous_snapshot" 2>/dev/null || [ ! -s "$previous_snapshot" ]; then
+			rm -f "$previous_snapshot"
+			warn "Could not snapshot the active nftables ruleset; refusing to replace it"
+			return 1
+		fi
+		NFT_PREVIOUS_TABLE_SNAPSHOT="$previous_snapshot"
+	else
+		rm -f "$previous_snapshot"
+	fi
+	if command nft list table inet fw4 >/dev/null 2>&1; then
+		if { command nft -a list chain inet fw4 input 2>/dev/null; command nft -a list chain inet fw4 forward 2>/dev/null; } | grep -q 'asclash-fwd'; then
+			NFT_PREVIOUS_TUN_FORWARD="true"
+		fi
+	fi
 
     # `update` can rebuild this table without calling stop(). Remove the fw4
     # accept hooks first; they live outside inet clash and would otherwise be
@@ -3212,6 +3257,14 @@ update_rules() {
         return 1
     fi
 
+    if ! nft list table inet clash >/dev/null 2>&1; then
+        ASCLASH_UPDATE_DEFERRED="true"
+        ASCLASH_FAKEIP_STATE="waiting"
+        ASCLASH_GROUPED_STATE="waiting"
+        msg "ASClash firewall table is not active; deferring provider-derived firewall updates until the service starts"
+        return 0
+    fi
+
     # Also refresh the auto-generated fakeip whitelist on this same cron cycle
     # (runs every 30 minutes by default). update_fakeip_whitelist_sets is a
     # no-op when the current fake-ip-filter-mode is neither whitelist nor rule.
@@ -3322,6 +3375,9 @@ setup_routing_rules() {
             ;;
         "mixed")
             ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            # Keep marked UDP from falling through to the main table while
+            # clash-tun is absent or being recreated.
+            ip route replace unreachable default table "$TABLE_TUN_UDP" 2>/dev/null || return 1
             ip rule add pref "$PREF_TPROXY" fwmark "$MARK_TPROXY" table "$TABLE_TPROXY" 2>/dev/null || return 1
             ip rule add pref "$PREF_TUN_UDP" fwmark "$MARK_TUN_UDP" table "$TABLE_TUN_UDP" 2>/dev/null || return 1
             msg "Routing: TCP fwmark $MARK_TPROXY → table $TABLE_TPROXY pref $PREF_TPROXY, UDP fwmark $MARK_TUN_UDP → table $TABLE_TUN_UDP pref $PREF_TUN_UDP (MIXED mode)"
@@ -3348,6 +3404,7 @@ teardown_routing_rules() {
     while ip route del local default dev lo table "$TABLE_TPROXY" 2>/dev/null; do :; done
     while ip route del default dev clash-tun table "$TABLE_TPROXY" 2>/dev/null; do :; done
     while ip route del default dev clash-tun table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
+    while ip route del unreachable default table "$TABLE_TUN_UDP" 2>/dev/null; do :; done
 
     # ip rule del removes only ONE matching rule per call; use an unbounded
     # while loop (same pattern as tun_route_reset_rule) so all duplicates
@@ -3742,19 +3799,24 @@ tun_route_reset_rule() {
 tun_route_ensure_policy_state() {
     case "$PROXY_MODE" in
         "tun")
-            tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY"
             ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY"
             ;;
         "mixed")
-            tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY"
-            tun_route_reset_rule "$MARK_TUN_UDP" "$TABLE_TUN_UDP" "$PREF_TUN_UDP"
             ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+            ip route replace unreachable default table "$TABLE_TUN_UDP" 2>/dev/null || return 1
+            tun_route_reset_rule "$MARK_TPROXY" "$TABLE_TPROXY" "$PREF_TPROXY" || return 1
+            tun_route_reset_rule "$MARK_TUN_UDP" "$TABLE_TUN_UDP" "$PREF_TUN_UDP" || return 1
             ;;
     esac
 }
 
-tun_route_setup() {
+tun_route_setup_unlocked() {
     load_all_settings_once
+    pidof clash >/dev/null 2>&1 || {
+        msg "TUN route setup skipped because the Clash core is not running"
+        return 0
+    }
     case "$PROXY_MODE" in
         "tun")
             tun_route_ensure_policy_state || return 1
@@ -3772,6 +3834,36 @@ tun_route_setup() {
             msg "tun_route_setup: nothing to do for proxy mode '$PROXY_MODE'"
             ;;
     esac
+}
+
+tun_route_setup() {
+    with_operation_lock tun_route_setup_unlocked
+}
+
+tun_route_fallback_unlocked() {
+    load_all_settings_once
+    # Settings may already reflect a newly saved mode while the old routes
+    # remain active until restart. Restore both reserved-table fallbacks so a
+    # tunnel removal cannot make either fwmark rule fall through to main.
+    ip route replace local default dev lo table "$TABLE_TPROXY" 2>/dev/null || return 1
+    ip route replace unreachable default table "$TABLE_TUN_UDP" 2>/dev/null || return 1
+    msg "TUN interface disappeared; restored fail-closed routes for tables $TABLE_TPROXY and $TABLE_TUN_UDP"
+}
+
+tun_route_fallback() {
+    with_operation_lock tun_route_fallback_unlocked
+}
+
+tun_route_watch_unlocked() {
+    load_all_settings_once
+    case "$PROXY_MODE" in
+        "tun"|"mixed") tun_route_setup_unlocked ;;
+        *) msg "tun_route_watch: nothing to do for proxy mode '$PROXY_MODE'" ;;
+    esac
+}
+
+tun_route_watch() {
+    with_operation_lock tun_route_watch_unlocked
 }
 
 policy_rule_exists() {
@@ -3979,10 +4071,12 @@ start_unlocked() {
         setup_routing_rules || {
             warn "Policy-routing setup failed; rolling back nftables rules"
             teardown_routing_rules
-            rollback_nft_rules ""
+            rollback_nft_rules "" true
             set_list_progress "failed"
             return 1
         }
+        [ -z "$NFT_PREVIOUS_TABLE_SNAPSHOT" ] || rm -f "$NFT_PREVIOUS_TABLE_SNAPSHOT"
+        NFT_PREVIOUS_TABLE_SNAPSHOT=""
     else
         msg "ERROR: Failed to apply nftables rules"
         set_list_progress "failed"
@@ -4120,6 +4214,7 @@ run_update_cycle() {
     local trigger="$1" readiness="$2" old_grouped_digest new_grouped_digest update_rc
     acquire_update_lock || return 0
     ASCLASH_OPERATION_LOCK_HELD="true"
+    ASCLASH_UPDATE_DEFERRED="false"
     ASCLASH_PROGRESS_ID="${trigger}-$$"
     ASCLASH_LIST_CYCLE_ACTIVE="true"
     begin_list_diagnostics "checking" "update-$$" "$trigger"
@@ -4133,7 +4228,7 @@ run_update_cycle() {
         [ "$ASCLASH_FAKEIP_STATE" = "checking" ] && ASCLASH_FAKEIP_STATE="error"
         [ "$ASCLASH_GROUPED_STATE" = "checking" ] && ASCLASH_GROUPED_STATE="error"
     fi
-    if [ "$update_rc" -eq 0 ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
+    if [ "$update_rc" -eq 0 ] && [ "$ASCLASH_UPDATE_DEFERRED" != "true" ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
         new_grouped_digest=""
         [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
         if [ -n "$new_grouped_digest" ] && [ "$new_grouped_digest" != "$old_grouped_digest" ]; then
@@ -4149,12 +4244,20 @@ run_update_cycle() {
             msg "Grouped fakeip sources unchanged, keeping active nftables rules"
         fi
     fi
-    [ "$update_rc" -ne 0 ] || set_list_progress "applied"
-    finalize_grouped_list_diagnostics
+    if [ "$update_rc" -ne 0 ]; then
+        set_list_progress "failed"
+    elif [ "$ASCLASH_UPDATE_DEFERRED" = "true" ]; then
+        set_list_progress "deferred"
+    else
+        set_list_progress "applied"
+        finalize_grouped_list_diagnostics
+    fi
     ASCLASH_LIST_CYCLE_TIME=$(date +%s 2>/dev/null)
     case "$ASCLASH_LIST_CYCLE_TIME" in ''|*[!0-9]*) ASCLASH_LIST_CYCLE_TIME=0 ;; esac
     if [ "$update_rc" -ne 0 ]; then
         ASCLASH_LIST_CYCLE_PHASE="failed"
+    elif [ "$ASCLASH_UPDATE_DEFERRED" = "true" ]; then
+        ASCLASH_LIST_CYCLE_PHASE="deferred"
     elif [ "$readiness" = "timeout" ]; then
         ASCLASH_LIST_CYCLE_PHASE="timeout"
     else
@@ -4228,11 +4331,10 @@ case "$1" in
         # The package-installed hotplug script handles the normal case
         # (clash-tun coming up after mihomo starts). This call covers the
         # fast-respawn edge case where clash-tun is still up when this runs.
-        load_all_settings_once
-        case "$PROXY_MODE" in
-            "tun"|"mixed") tun_route_setup ;;
-            *) msg "tun_route_watch: nothing to do for proxy mode '$PROXY_MODE'" ;;
-        esac
+        tun_route_watch
+        ;;
+    tun_route_fallback)
+        tun_route_fallback
         ;;
     validate_policy)
         if validate_policy_routing_state; then
@@ -4244,7 +4346,7 @@ case "$1" in
         fi
         ;;
     repair_policy)
-        if repair_policy_routing_state; then
+        if with_operation_lock repair_policy_routing_state; then
             msg "Policy routing state repaired successfully"
             exit 0
         else
@@ -4266,7 +4368,7 @@ case "$1" in
         exit $?
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|update|post-start-update [ready|timeout]|update-ip-whitelist|rule-providers-ready|tun_route_setup|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
+        echo "Usage: $0 {start|stop|restart|update|post-start-update [ready|timeout]|update-ip-whitelist|rule-providers-ready|tun_route_setup|tun_route_fallback|tun_route_watch|validate_policy|repair_policy|validate_forward|repair_forward_rules}"
         exit 1
         ;;
 esac

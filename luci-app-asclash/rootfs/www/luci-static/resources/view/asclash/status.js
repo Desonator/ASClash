@@ -9,29 +9,6 @@ const FAKEIP_WHITELIST_SUMMARY_FILENAME = 'fakeip-whitelist-summary.txt';
 const FAKEIP_WHITELIST_FILENAME = 'fakeip-whitelist-ipcidr.txt';
 const GROUPED_FAKEIP_SUMMARY_FILENAME = 'fakeip-port-summary.txt';
 
-function readTopLevelYamlValue(configContent, key) {
-    const line = String(configContent || '').split(/\r?\n/).find(row =>
-        new RegExp('^' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':[\\t ]*').test(row)
-    );
-    if (!line) return '';
-    let value = line.replace(new RegExp('^' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':[\\t ]*'), '').trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
-        value = value.slice(1, -1);
-    else
-        value = value.replace(/\s+#.*$/, '').trim();
-    return value;
-}
-
-function getSmartApiBaseUrl(configContent) {
-    let address = readTopLevelYamlValue(configContent, 'external-controller');
-    if (!address) throw new Error(_('Smart API controller is not configured.'));
-    if (/^https?:\/\//i.test(address)) return address.replace(/\/$/, '');
-    if (address.startsWith('0.0.0.0:')) address = '127.0.0.1:' + address.slice('0.0.0.0:'.length);
-    else if (address.startsWith(':')) address = '127.0.0.1' + address;
-    else if (address.startsWith('[::]:')) address = '[::1]:' + address.slice('[::]:'.length);
-    return 'http://' + address;
-}
-
 function yamlScalar(value) {
     const text = String(value || '').trim().replace(/\s+#.*$/, '').replace(/,$/, '').trim();
     if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))
@@ -109,20 +86,28 @@ function extractSmartGroupNames(configContent) {
     return Array.from(names);
 }
 
-async function requestSmartGroupWeights(groupName, configContent) {
-	const baseUrl = getSmartApiBaseUrl(configContent);
-	const secret = readTopLevelYamlValue(configContent, 'secret');
-	const args = [ '-fsS', '--connect-timeout', '2', '--max-time', '6', '-w', '\n%{http_code}' ];
-	if (secret) args.push('-H', `Authorization: Bearer ${secret}`);
-	args.push(`${baseUrl}/group/${encodeURIComponent(groupName)}/weights`);
-	const result = await fs.exec('curl', args);
+function encodeApiPathSegment(value) {
+	return encodeURIComponent(value).replace(/[!'()*]/g, ch => '%' + ch.charCodeAt(0).toString(16).toUpperCase());
+}
+
+async function requestSmartGroupWeights(groupName) {
+	const result = await fs.exec('/opt/clash/bin/asclash-api', ['weights', encodeApiPathSegment(groupName)]);
     const output = String(result.stdout || '');
     const statusMatch = output.match(/\n(\d{3})\s*$/);
     const httpStatus = statusMatch ? Number(statusMatch[1]) : 0;
     const responseBody = statusMatch ? output.slice(0, statusMatch.index) : output;
-    if (result.code !== 0) {
-        const error = new Error((result.stderr || '').trim() || _('Smart weights API request failed.'));
-        error.unsupported = httpStatus === 404 || httpStatus === 501;
+    if (httpStatus === 404 || httpStatus === 501) {
+        const error = new Error(_('Smart weights are not supported by this Mihomo core.'));
+        error.unsupported = true;
+        throw error;
+    }
+    if (result.code !== 0 || httpStatus < 200 || httpStatus >= 300) {
+        const helperErrors = {
+            3: _('Smart API controller is not configured.'),
+            4: _('Mihomo API controller must be bound to loopback.'),
+            5: _('The configured API secret contains unsupported line breaks.')
+        };
+        const error = new Error(helperErrors[result.code] || (result.stderr || '').trim() || _('Smart weights API request failed.'));
         throw error;
     }
     try {
@@ -332,7 +317,7 @@ function createSmartWeightsSection(smartGroupNames, configContent, isRussian, sh
         const results = [];
         for (const groupName of smartGroupNames) {
             try {
-                const payload = await requestSmartGroupWeights(groupName, configContent);
+                const payload = await requestSmartGroupWeights(groupName);
                 results.push({ groupName, rows: uniqueSmartWeightRows(payload), error: '' });
             } catch (e) {
                 const previous = lastResults.find(result => result.groupName === groupName);

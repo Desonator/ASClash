@@ -6,6 +6,25 @@
 
 CONFIG_FILE="/opt/clash/config.yaml"
 
+validate_encoded_segment() {
+	[ -n "$1" ] || return 1
+	printf '%s' "$1" | awk '
+		BEGIN { hex = "0123456789abcdefABCDEF" }
+		{
+			if ($0 == "." || $0 == "..") exit 1
+			for (i = 1; i <= length($0); i++) {
+				c = substr($0, i, 1)
+				if (c == "%") {
+					if (i + 2 > length($0) || index(hex, substr($0, i + 1, 1)) == 0 || index(hex, substr($0, i + 2, 1)) == 0) exit 1
+					byte = tolower(substr($0, i + 1, 2))
+					if (byte == "00" || byte == "0a" || byte == "0d" || byte == "2e" || byte == "2f" || byte == "3f" || byte == "23" || byte == "25" || byte == "5c") exit 1
+					i += 2
+				} else if (c !~ /^[A-Za-z0-9._~-]$/) exit 1
+			}
+		}
+	'
+}
+
 yaml_scalar() {
 	scalar=$(awk -v wanted="$1" '
 	function trim(value) {
@@ -64,7 +83,10 @@ yaml_scalar() {
 case "${1:-}" in
 	version) endpoint="version" ;;
 	connections) endpoint="connections" ;;
-	reload-config) endpoint="configs" ;;
+	weights)
+		[ "$#" -eq 2 ] && validate_encoded_segment "$2" || exit 7
+		endpoint="group/$2/weights"
+		;;
 	conntrack)
 		[ -r /proc/net/nf_conntrack ] || exit 6
 		awk '/^ipv4 2 tcp / && (/ESTABLISHED/ || /SYN_SENT/ || /TIME_WAIT/) { print; n++; if (n >= 1024) exit }' /proc/net/nf_conntrack
@@ -126,18 +148,13 @@ fi
 
 max_time=4
 [ "$endpoint" = "connections" ] && max_time=2
+case "$endpoint" in
+	*/*/weights) max_time=6 ;;
+esac
 tls_option=""
 [ "$protocol" = "https" ] && tls_option="-k"
-if [ "$endpoint" = "configs" ]; then
-	max_time=15
-	curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
-		$tls_option --config "$auth_config" -X PUT -H 'Content-Type: application/json' \
-		--data '{"path":"","payload":""}' --write-out '\n%{http_code}' \
-		"$protocol://$address/configs?force=true"
-else
-	curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
-		$tls_option --config "$auth_config" --write-out '\n%{http_code}' \
-		"$protocol://$address/$endpoint"
-fi
+curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
+	$tls_option --config "$auth_config" --write-out '\n%{http_code}' \
+	"$protocol://$address/$endpoint"
 curl_status=$?
 [ "$curl_status" -eq 0 ] || exit 10

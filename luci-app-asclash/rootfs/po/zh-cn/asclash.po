@@ -4,8 +4,14 @@
 #
 msgid ""
 msgstr ""
+"Project-Id-Version: ASClash 4.8\n"
+"PO-Revision-Date: 2026-11-26 00:00+0000\n"
+"Last-Translator: ASClash contributors\n"
+"Language-Team: Simplified Chinese\n"
 "Language: zh-cn\n"
+"MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 msgid "Configuration"
@@ -665,6 +671,15 @@ msgstr "配置重载失败（%s，HTTP %s）。%s %s 请尝试使用“保存并
 msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl, or use plain external-controller for hot reload.)"
 msgstr "（提示：系统 curl 不支持 HTTPS。请安装 curl-ssl，或使用普通 external-controller 进行热重载。）"
 
+msgid "Config reload failed (HTTP %s). %s %s Try \"Save & Restart core\" for a full restart."
+msgstr "配置重载失败（HTTP %s）。%s %s 请尝试“保存并重启内核”进行完整重启。"
+
+msgid "(Hint: the system curl has no HTTPS support. Install curl-ssl.)"
+msgstr "（提示：系统 curl 不支持 HTTPS。请安装 curl-ssl。）"
+
+msgid "The API controller must use a loopback address for safe local reload."
+msgstr "为了安全地进行本地重载，API 控制器必须使用回环地址。"
+
 msgid "Config reloaded, but updating subscription IP cache failed: %s"
 msgstr "配置已重载，但更新订阅 IP 缓存失败：%s"
 
@@ -851,6 +866,12 @@ msgstr "此 Smart 组暂时没有权重数据。"
 msgid "Smart API controller is not configured."
 msgstr "配置中未设置 Smart API 控制器地址。"
 
+msgid "Mihomo API controller must be bound to loopback."
+msgstr "Mihomo API 控制器必须绑定到本地回环地址。"
+
+msgid "Smart weights are not supported by this Mihomo core."
+msgstr "此 Mihomo 内核不支持获取 Smart 组权重。"
+
 msgid "Summary statistics were stale; total was recovered from the generated AUTO block."
 msgstr "摘要统计已过期；总数已从自动生成的 AUTO 区域重新计算。"
 
@@ -961,6 +982,21 @@ msgstr "启用后会阻止 UDP 端口 443 上的 QUIC 流量。这可提升 YouT
 
 msgid "Kernel Status"
 msgstr "内核状态"
+
+msgid "Service is running"
+msgstr "服务正在运行"
+
+msgid "Service is stopped"
+msgstr "服务已停止"
+
+msgid "Kernel process is running"
+msgstr "内核进程正在运行"
+
+msgid "Kernel process is stopped"
+msgstr "内核进程已停止"
+
+msgid "Checking kernel status..."
+msgstr "正在检查内核状态..."
 
 msgid "Installed"
 msgstr "已安装"
@@ -1235,6 +1271,9 @@ msgstr "无法确定系统架构，将回退使用 amd64。"
 msgid "Invalid GitHub repository. Use owner/repository format."
 msgstr "GitHub 仓库格式无效，请使用 owner/repository 格式。"
 
+msgid "Invalid GitHub repository. Use owner/repo format."
+msgstr "GitHub 仓库格式无效，请使用 owner/repo 格式。"
+
 msgid "Downloading Mihomo kernel..."
 msgstr "正在下载 Mihomo 核心..."
 
@@ -1478,4 +1517,46 @@ msgstr "页面打开期间 DHCP 保留租约已更改。请刷新页面并重新
 
 msgid "Could not re-check DHCP reservations; settings were not saved."
 msgstr "无法重新检查 DHCP 保留租约；设置未保存。"
+
+msgid "Failed to stop Clash before replacing the kernel."
+msgstr "替换内核前无法停止 Clash。"
+
+msgid "Could not confirm that the Clash service stopped; the kernel was not replaced."
+msgstr "无法确认 Clash 服务已停止；未替换内核。"
+
+msgid "Failed to preserve the previous kernel binary"
+msgstr "无法保留原内核文件"
+
+msgid "Kernel was installed, but the previous binary backup could not be removed: %s"
+msgstr "内核已安装，但无法删除旧内核备份：%s"
+
+msgid "Could not remove the failed kernel binary."
+msgstr "无法删除安装失败的内核文件。"
+
+msgid "Could not restore the previous kernel binary; backup remains at %s."
+msgstr "无法恢复原内核文件；备份仍保留在 %s。"
+
+msgid "Previous Clash service could not be restarted."
+msgstr "无法重新启动原 Clash 服务。"
+
+msgid "Previous Clash service could not be restarted: %s"
+msgstr "无法重新启动原 Clash 服务：%s"
+
+msgid "Failed to restore previous config.yaml: %s"
+msgstr "无法恢复之前的 config.yaml：%s"
+
+msgid "Another kernel installation is already running."
+msgstr "已有另一个内核安装任务正在运行。"
+
+msgid "Could not release the kernel installation lock; remove %s before retrying."
+msgstr "无法释放内核安装锁；请删除 %s 后重试。"
+
+msgid "The reload outcome is unknown because no HTTP response was received. The new config remains saved; restart Clash to synchronize the running core."
+msgstr "未收到 HTTP 响应，无法确定重载结果。新配置仍已保存；请重启 Clash 以同步正在运行的内核。"
+
+msgid "Firewall is not active; provider-derived firewall lists will be refreshed when Clash starts."
+msgstr "防火墙尚未启用；Clash 启动后将刷新基于 provider 的防火墙列表。"
+
+msgid "Firewall is not active; list refresh is deferred until Clash starts"
+msgstr "防火墙尚未启用；列表刷新将推迟到 Clash 启动后"
 

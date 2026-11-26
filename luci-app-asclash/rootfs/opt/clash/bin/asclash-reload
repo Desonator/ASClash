@@ -1,0 +1,96 @@
+#!/bin/sh
+
+# Mutating Mihomo API helper for the LuCI config page. Kept separate from the
+# read-scope diagnostics helper so read-only ACL users cannot trigger reloads.
+CONFIG_FILE="/opt/clash/config.yaml"
+[ "$#" -eq 0 ] || exit 2
+[ -r "$CONFIG_FILE" ] || exit 1
+
+yaml_scalar() {
+	awk -v wanted="$1" '
+	function trim(s) {
+		sub(/^[ \t]+/, "", s)
+		sub(/[ \t\r]+$/, "", s)
+		return s
+	}
+	function decode_quoted(value, quote, result, i, ch, escaped_char) {
+		result = ""
+		for (i = 2; i <= length(value); i++) {
+			ch = substr(value, i, 1)
+			if (quote == "\047" && ch == "\047" && substr(value, i + 1, 1) == "\047") {
+				result = result "\047"
+				i++
+				continue
+			}
+			if (ch == quote) break
+			if (quote == "\042" && ch == "\\") {
+				escaped_char = substr(value, ++i, 1)
+				if (escaped_char == "n") result = result "\n"
+				else if (escaped_char == "r") result = result "\r"
+				else if (escaped_char == "t") result = result "\t"
+				else result = result escaped_char
+			} else result = result ch
+		}
+		return result
+	}
+	/^[^ \t#][^:]*:/ {
+		key = $0
+		sub(/:.*/, "", key)
+		if (key != wanted) next
+		value = trim(substr($0, index($0, ":") + 1))
+		quote = substr(value, 1, 1)
+		if (quote == "\042" || quote == "\047") print decode_quoted(value, quote)
+		else { sub(/[ \t]+#.*/, "", value); print trim(value) }
+		exit
+	}
+	' "$CONFIG_FILE" 2>/dev/null
+}
+
+controller=$(yaml_scalar external-controller)
+tls_controller=$(yaml_scalar external-controller-tls)
+secret=$(yaml_scalar secret)
+if [ -n "$tls_controller" ]; then
+	protocol="https"
+	address="$tls_controller"
+else
+	protocol="http"
+	address="$controller"
+fi
+[ -n "$address" ] || exit 3
+case "$address" in
+	http://*) protocol="http"; address=${address#http://} ;;
+	https://*) protocol="https"; address=${address#https://} ;;
+esac
+case "$address" in
+	0.0.0.0:*) address="127.0.0.1:${address#*:}" ;;
+	\[::\]:*) address="[::1]:${address#*]:}" ;;
+	:*) address="127.0.0.1$address" ;;
+esac
+case "$protocol://$address" in
+	http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*) ;;
+	*) exit 4 ;;
+esac
+
+umask 077
+auth_config=$(mktemp /tmp/asclash-reload.XXXXXX) || exit 1
+trap 'rm -f "$auth_config"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ -n "$secret" ]; then
+	newline=$(printf '\nX')
+	newline=${newline%X}
+	carriage_return=$(printf '\r')
+	case "$secret" in *"$newline"*|*"$carriage_return"*) exit 5 ;; esac
+	escaped_secret=$(printf '%s' "$secret" | sed 's/\\/\\\\/g; s/"/\\"/g') || exit 1
+	printf 'header = "Authorization: Bearer %s"\n' "$escaped_secret" > "$auth_config" || exit 1
+fi
+
+tls_option=""
+[ "$protocol" = "https" ] && tls_option="-k"
+curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time 15 \
+	$tls_option --config "$auth_config" -X PUT -H 'Content-Type: application/json' \
+	--data '{"path":"","payload":""}' --write-out '\n%{http_code}' \
+	"$protocol://$address/configs?force=true"
+curl_status=$?
+[ "$curl_status" -eq 0 ] || exit 10

@@ -42,18 +42,130 @@ sleep 10
 
 CLASH_CONFIG="/opt/clash/config.yaml"
 
-# Extract API port from external-controller (e.g. "0.0.0.0:9090" → "9090")
-api_port=$(grep -m1 '^\s*external-controller:' "$CLASH_CONFIG" 2>/dev/null \
-    | sed 's/.*:\([0-9][0-9]*\)\s*$/\1/')
-[ -n "$api_port" ] || api_port="9090"
+yaml_scalar() {
+    awk -v wanted="$1" '
+    function trim(s) {
+        sub(/^[ \t]+/, "", s)
+        sub(/[ \t\r]+$/, "", s)
+        return s
+    }
+    function unquote(value, quote, result, i, ch, escaped_char) {
+        result = ""
+        for (i = 2; i <= length(value); i++) {
+            ch = substr(value, i, 1)
+            if (quote == "\047" && ch == "\047" && substr(value, i + 1, 1) == "\047") {
+                result = result "\047"; i++; continue
+            }
+            if (ch == quote) break
+            if (quote == "\042" && ch == "\\") {
+                escaped_char = substr(value, ++i, 1)
+                if (escaped_char == "n") result = result "\n"
+                else if (escaped_char == "r") result = result "\r"
+                else if (escaped_char == "t") result = result "\t"
+                else result = result escaped_char
+            } else result = result ch
+        }
+        return result
+    }
+    /^[^ \t#][^:]*:/ {
+        key = $0; sub(/:.*/, "", key)
+        if (key != wanted) next
+        value = trim(substr($0, index($0, ":") + 1))
+        quote = substr(value, 1, 1)
+        if (quote == "\042" || quote == "\047") print unquote(value, quote)
+        else { sub(/[ \t]+#.*/, "", value); print trim(value) }
+        exit
+    }
+    ' "$CLASH_CONFIG" 2>/dev/null
+}
 
-# Always connect via loopback — mihomo listens on 0.0.0.0 so this works
-# regardless of the router's LAN IP address.
-API="http://127.0.0.1:${api_port}"
+api_controller=$(yaml_scalar external-controller)
+tls_controller=$(yaml_scalar external-controller-tls)
+API_PROTOCOL="http"
+[ -n "$tls_controller" ] && { api_controller="$tls_controller"; API_PROTOCOL="https"; }
+case "$api_controller" in
+    http://*) API_PROTOCOL="http"; api_controller=${api_controller#http://} ;;
+    https://*) API_PROTOCOL="https"; api_controller=${api_controller#https://} ;;
+esac
+case "$api_controller" in
+    0.0.0.0:*) api_controller="127.0.0.1:${api_controller#*:}" ;;
+    localhost:*) api_controller="127.0.0.1:${api_controller#*:}" ;;
+    \[::\]:*) api_controller="[::1]:${api_controller#*]:}" ;;
+    :*) api_controller="127.0.0.1$api_controller" ;;
+    "") api_controller="127.0.0.1:9090" ;;
+esac
+case "$API_PROTOCOL://$api_controller" in
+    http://127.0.0.1:*|https://127.0.0.1:*|http://\[::1\]:*|https://\[::1\]:*) ;;
+    *) warn "API controller is not loopback-bound; skipping automatic provider refresh"; exit 0 ;;
+esac
+API="$API_PROTOCOL://$api_controller"
+CURL_TLS_OPTION=""
+[ "$API_PROTOCOL" = "https" ] && CURL_TLS_OPTION="-k"
 
-# Extract secret if configured; build the Authorization header value
+# Parse the configured secret as a YAML scalar; it is passed only through a
+# private temporary curl config file, never in process arguments.
 secret=$(grep -m1 '^\s*secret:' "$CLASH_CONFIG" 2>/dev/null \
     | sed 's/^\s*secret:\s*//' | tr -d '"'"'" | tr -d '[:space:]')
+
+# Parse the YAML scalar without stripping meaningful characters inside quotes.
+secret=$(awk '
+function trim(s) {
+    gsub(/^[ \t]+|[ \t\r]+$/, "", s)
+    return s
+}
+function unquote(value, quote, result, i, ch, next_ch) {
+    result = ""
+    for (i = 2; i <= length(value); i++) {
+        ch = substr(value, i, 1)
+        if (quote == "\047" && ch == "\047" && substr(value, i + 1, 1) == "\047") {
+            result = result "\047"
+            i++
+        } else if (ch == quote) {
+            break
+        } else if (quote == "\042" && ch == "\\") {
+            next_ch = substr(value, ++i, 1)
+            if (next_ch == "n") result = result "\n"
+            else if (next_ch == "r") result = result "\r"
+            else if (next_ch == "t") result = result "\t"
+            else result = result next_ch
+        } else result = result ch
+    }
+    return result
+}
+/^[^ \t#][^:]*:/ {
+    key = $0
+    sub(/:.*/, "", key)
+    if (key != "secret") next
+    value = trim(substr($0, index($0, ":") + 1))
+    quote = substr(value, 1, 1)
+    if (quote == "\042" || quote == "\047") print unquote(value, quote)
+    else { sub(/[ \t]+#.*/, "", value); print trim(value) }
+    exit
+}
+' "$CLASH_CONFIG" 2>/dev/null)
+newline=$(printf '\nX')
+newline=${newline%X}
+carriage_return=$(printf '\r')
+case "$secret" in
+    *"$newline"*|*"$carriage_return"*)
+        warn "API secret contains a line break; skipping provider refresh"
+        exit 0
+        ;;
+esac
+
+# Store the Authorization header on tmpfs with restrictive permissions. curl
+# receives only the config filename, not the secret itself.
+umask 077
+AUTH_CONFIG=$(mktemp /tmp/clash-hotplug-auth.XXXXXX) || exit 1
+trap 'rm -f "$AUTH_CONFIG"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ -n "$secret" ]; then
+	escaped_secret=$(printf '%s' "$secret" | sed 's/\\/\\\\/g; s/"/\\"/g') || exit 1
+	printf 'header = "Authorization: Bearer %s"\n' "$escaped_secret" > "$AUTH_CONFIG" || exit 1
+fi
+unset secret escaped_secret
 
 # ---------------------------------------------------------------------------
 # urlencode <string>
@@ -84,19 +196,12 @@ urlencode() {
 # ---------------------------------------------------------------------------
 # api_put <path>
 #
-# Sends a PUT request to the mihomo API. Includes the Authorization header
-# only when a secret is configured. Returns curl's exit code.
+# Sends a PUT request using the private curl config for optional auth.
 # ---------------------------------------------------------------------------
 api_put() {
     local path="$1"
-    if [ -n "$secret" ]; then
-        curl -sf -X PUT \
-            -H "Authorization: Bearer ${secret}" \
-            "${API}${path}" > /dev/null 2>&1
-    else
-        curl -sf -X PUT \
-            "${API}${path}" > /dev/null 2>&1
-    fi
+    curl -sf --noproxy '*' --connect-timeout 2 --max-time 15 $CURL_TLS_OPTION --config "$AUTH_CONFIG" -X PUT \
+        "${API}${path}" > /dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -106,14 +211,8 @@ api_put() {
 # ---------------------------------------------------------------------------
 api_get() {
     local path="$1"
-    if [ -n "$secret" ]; then
-        curl -sf \
-            -H "Authorization: Bearer ${secret}" \
-            "${API}${path}" 2>/dev/null
-    else
-        curl -sf \
-            "${API}${path}" 2>/dev/null
-    fi
+    curl -sf --noproxy '*' --connect-timeout 2 --max-time 10 $CURL_TLS_OPTION --config "$AUTH_CONFIG" \
+        "${API}${path}" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------

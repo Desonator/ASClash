@@ -190,7 +190,10 @@ async function openDashboard() {
         if (secret) qp.set('secret', secret);
         qp.set('hostname', host);
         qp.set('port', port);
-        const url = `${scheme}//${host}:${port}${uiPath}?${qp.toString()}`;
+        // Keep the Mihomo secret in the URL fragment: fragments are not sent
+        // in HTTP requests or Referer headers. The bundled Zashboard accepts
+        // bootstrap parameters from either the query string or hash query.
+        const url = `${scheme}//${host}:${port}${uiPath}#?${qp.toString()}`;
 
         const newWindow = window.open(url, '_blank');
         if (!newWindow) {
@@ -232,7 +235,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.43';
+const ASCLASH_VERSION = '4.8.2.44';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -376,12 +379,18 @@ return view.extend({
 
                 // The helper reads the secret from config.yaml into a mode-600
                 // tmpfs curl config and refuses non-loopback controller addresses.
-                const res = await fs.exec('/opt/clash/bin/asclash-api', ['reload-config']);
+                const res = await fs.exec('/opt/clash/bin/asclash-reload', []);
                 const responseLines = String(res.stdout || '').split(/\r?\n/);
                 const httpCode = (responseLines.pop() || '').trim();
                 const responseBody = responseLines.join('\n').trim();
 
-                if (res.code !== 0 || (httpCode !== '204' && httpCode !== '200')) {
+                const reloadAcceptedByHttp = httpCode === '204' || httpCode === '200';
+                if (!reloadAcceptedByHttp && res.code === 10 && (!httpCode || httpCode === '000')) {
+                    ui.addNotification(null, E('p', _('The reload outcome is unknown because no HTTP response was received. The new config remains saved; restart Clash to synchronize the running core.')), 'warning');
+                    return;
+                }
+
+                if (!reloadAcceptedByHttp) {
                     let rollbackMessage = '';
                     try {
                         await view_asclash_utils.writeFileAtomic('/opt/clash/config.yaml', staged.previousConfig);

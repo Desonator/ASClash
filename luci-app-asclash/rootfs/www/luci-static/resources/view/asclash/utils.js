@@ -275,7 +275,7 @@ async function waitForListProgress(previous, timeoutMs) {
         if (current && current !== baseline) {
             const fields = current.split('|');
             const phase = fields[1] || '';
-            if (phase === 'applied' || phase === 'failed')
+            if (phase === 'applied' || phase === 'failed' || phase === 'deferred')
                 return { operation: fields[0] || '', phase };
         }
         await new Promise(resolve => setTimeout(resolve, 750));
@@ -302,7 +302,7 @@ async function watchListProgress(previous, onProgress, timeoutMs) {
                 lastPhase = phase;
                 if (typeof onProgress === 'function') onProgress({ operation, phase });
             }
-            quietUntil = phase === 'applied' || phase === 'failed' ? Date.now() + 70000 : 0;
+            quietUntil = phase === 'applied' || phase === 'failed' || phase === 'deferred' ? Date.now() + 70000 : 0;
             last = current;
         }
 
@@ -325,6 +325,8 @@ function notifyListProgress(progress) {
 
     const message = progress.phase === 'failed'
         ? _('List generation or firewall application failed. Check Diagnostics and the system log.')
+        : progress.phase === 'deferred'
+            ? _('Firewall is not active; provider-derived firewall lists will be refreshed when Clash starts.')
         : progress.phase === 'applied' && String(progress.operation || '').startsWith('post-start-')
             ? _('Post-start provider refresh completed: firewall lists were updated after the core started. The earlier cached-list application was part of the same startup.')
             : progress.phase === 'applied' ? _('Generated lists and firewall rules were applied successfully.') : null;

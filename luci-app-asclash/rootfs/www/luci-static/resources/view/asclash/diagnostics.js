@@ -549,14 +549,15 @@ return view.extend({
 		const groupedState = listDiagnostics.grouped.state;
 		const listCycle = listDiagnostics.cycle.phase;
 		const listHasError = fakeState === 'error' || groupedState === 'error' || (listCycle === 'complete' && (!whitelistActive || !groupedActive));
-		const listHasWarning = ['timeout', 'partial', 'fallback', 'generated', 'not-applied'].includes(fakeState) || ['timeout', 'partial', 'fallback', 'generated', 'not-applied'].includes(groupedState) || listCycle === 'timeout' || skippedSummary.length > 0;
+		const listHasWarning = ['timeout', 'partial', 'fallback', 'generated', 'not-applied'].includes(fakeState) || ['timeout', 'partial', 'fallback', 'generated', 'not-applied'].includes(groupedState) || ['timeout', 'deferred'].includes(listCycle) || skippedSummary.length > 0;
 		const listsState = listCycle === 'failed' || listHasError || (listCycle === 'waiting' && (progressPhase === 'failed' || serviceRunning === false)) ? 'error'
-			: ['waiting', 'checking', 'timeout'].includes(listCycle) ? 'warning'
+			: ['waiting', 'checking', 'timeout', 'deferred'].includes(listCycle) ? 'warning'
 			: listCycle === 'complete' && !listHasWarning ? 'ok' : listHasWarning ? 'warning' : 'unknown';
 		const listsStatus = listCycle === 'waiting' && serviceRunning === false ? _('Mihomo is not running; provider check has not started')
 			: listCycle === 'waiting' ? _('Waiting for provider files')
 			: listCycle === 'checking' ? _('Checking provider files')
 			: listCycle === 'timeout' ? _('Provider wait timed out')
+			: listCycle === 'deferred' ? _('Firewall is not active; list refresh is deferred until Clash starts')
 			: listCycle === 'failed' ? _('List update failed')
 			: listsState === 'ok' ? _('OK') : listsState === 'error' ? _('Problem')
 			: listCycle === 'complete' ? _('Completed with warnings') : _('Not checked');

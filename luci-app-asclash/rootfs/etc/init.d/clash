@@ -166,6 +166,20 @@ setup_clash_directories() {
 	return 0
 }
 
+write_dns_backup() {
+	local cachesize="$1" noresolv="$2" dns_server="$3" dns_server_owned="$4"
+	local temp_file="${DNS_BACKUP_FILE}.tmp.$$"
+	if ! (umask 077; printf 'CACHESIZE=%s\nNORESOLV=%s\nDNS_SERVER=%s\nDNS_SERVER_OWNED=%s\n' \
+		"$cachesize" "$noresolv" "$dns_server" "$dns_server_owned" > "$temp_file"); then
+		rm -f "$temp_file"
+		return 1
+	fi
+	if ! mv -f "$temp_file" "$DNS_BACKUP_FILE"; then
+		rm -f "$temp_file"
+		return 1
+	fi
+}
+
 # Function to configure DNS
 setup_dns() {
 	local dns_settings dns_enabled dns_listen dns_host dns_port dns_target dns_server dns_server_owned
@@ -256,26 +270,33 @@ setup_dns() {
 	# exactly as they were, rather than simply deleting them (which would lose any
 	# value the admin had explicitly configured before Clash was started).
 	if [ ! -f "$DNS_BACKUP_FILE" ]; then
-		mkdir -p "$(dirname "$DNS_BACKUP_FILE")" 2>/dev/null
+		mkdir -p "$(dirname "$DNS_BACKUP_FILE")" 2>/dev/null || return 1
 		if [ -n "$existing_server" ]; then
 			if [ "$dns_server" = "127.0.0.1#7874" ]; then
-				printf 'CACHESIZE=\nNORESOLV=\nDNS_SERVER=%s\nDNS_SERVER_OWNED=1\n' "$dns_server" > "$DNS_BACKUP_FILE"
+				write_dns_backup "" "" "$dns_server" "1" || return 1
 				msg "Detected legacy DNS state from prior unclean shutdown; using safe defaults for restore"
 			else
 				local orig_cachesize orig_noresolv
 				orig_cachesize=$(uci get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
 				orig_noresolv=$(uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null)
-				printf 'CACHESIZE=%s\nNORESOLV=%s\nDNS_SERVER=%s\nDNS_SERVER_OWNED=0\n' "$orig_cachesize" "$orig_noresolv" "$dns_server" > "$DNS_BACKUP_FILE"
+				write_dns_backup "$orig_cachesize" "$orig_noresolv" "$dns_server" "0" || return 1
 			fi
 		else
 			local orig_cachesize orig_noresolv
 			orig_cachesize=$(uci get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
 			orig_noresolv=$(uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null)
-			printf 'CACHESIZE=%s\nNORESOLV=%s\nDNS_SERVER=%s\nDNS_SERVER_OWNED=1\n' "$orig_cachesize" "$orig_noresolv" "$dns_server" > "$DNS_BACKUP_FILE"
+			write_dns_backup "$orig_cachesize" "$orig_noresolv" "$dns_server" "1" || return 1
 		fi
 	fi
 	if ! grep -q '^DNS_SERVER=' "$DNS_BACKUP_FILE"; then
-		printf 'DNS_SERVER=%s\nDNS_SERVER_OWNED=%s\n' "$dns_server" "$dns_server_owned" >> "$DNS_BACKUP_FILE"
+		local backup_migration="${DNS_BACKUP_FILE}.tmp.$$"
+		if ! cp -p "$DNS_BACKUP_FILE" "$backup_migration" || \
+		   ! printf 'DNS_SERVER=%s\nDNS_SERVER_OWNED=%s\n' "$dns_server" "$dns_server_owned" >> "$backup_migration" || \
+		   ! mv -f "$backup_migration" "$DNS_BACKUP_FILE"; then
+			rm -f "$backup_migration"
+			msg "ERROR: Failed to update DNS ownership backup"
+			return 1
+		fi
 	fi
 
 	if [ -z "$existing_server" ]; then
@@ -457,7 +478,11 @@ start_service() {
 
 	# Set up DNS — on failure, roll back the firewall rules we just applied.
 	setup_dns || {
-		msg "ERROR: Failed to configure DNS, rolling back firewall rules"
+		msg "ERROR: Failed to configure DNS, restoring any staged dnsmasq changes and rolling back firewall rules"
+		if [ -f "$DNS_BACKUP_FILE" ]; then
+			restore_dns || msg "WARNING: DNS rollback after setup failure was incomplete; backup retained for retry"
+			/etc/init.d/dnsmasq restart >/dev/null 2>&1 || msg "WARNING: Failed to restart dnsmasq after DNS setup rollback"
+		fi
 		remove_firewall_rules
 		return 1
 	}

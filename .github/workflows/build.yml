@@ -42,6 +42,40 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext libncurses5-dev rsync xsltproc build-essential gawk unzip zstd
 
+      - name: Validate source and run project tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            install-asclash.sh \
+            luci-app-asclash/rootfs/etc/init.d/clash \
+            luci-app-asclash/rootfs/etc/hotplug.d/iface/40-clash \
+            luci-app-asclash/rootfs/etc/hotplug.d/net/99-clash-tun \
+            luci-app-asclash/rootfs/opt/clash/bin/clash-rules \
+            luci-app-asclash/rootfs/opt/clash/bin/asclash-api \
+            luci-app-asclash/rootfs/opt/clash/bin/asclash-reload \
+            tests/*.sh; do
+            sh -n "$script"
+          done
+
+          while IFS= read -r source; do
+            node --check "$source"
+          done < <(find luci-app-asclash/rootfs/www/luci-static/resources/view/asclash -type f -name '*.js' ! -path '*/ace/*')
+          node --check tests/test-managed-direct-rule-edit.js
+          node --check tests/test-kernel-install.js
+          node --check tests/test-localization-parity.js
+          node --check tests/test-api-helper-acl.js
+
+          node tests/test-localization-parity.js
+          node tests/test-managed-direct-rule-edit.js
+          node tests/test-kernel-install.js
+          node tests/test-api-helper-acl.js
+          for test in tests/*.sh; do sh "$test"; done
+          msgfmt --check -o /dev/null luci-app-asclash/rootfs/po/ru/asclash.po
+          msgfmt --check -o /dev/null luci-app-asclash/rootfs/po/zh-cn/asclash.po
+
+          node -e 'JSON.parse(require("fs").readFileSync("luci-app-asclash/rootfs/usr/share/rpcd/acl.d/luci-app-asclash.json", "utf8")); JSON.parse(require("fs").readFileSync("luci-app-asclash/rootfs/usr/share/luci/menu.d/luci-app-asclash.json", "utf8"));'
+
       - name: Create SDK directories
         run: |
           echo "SDK_DL_DIR=$(mktemp -d)" >> "$GITHUB_ENV"
