@@ -1408,8 +1408,14 @@ msgstr "Результат не определён: обнаружены акт�
 msgid "Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again."
 msgstr "Результат не определён: не удалось сопоставить активный LAN TCP-поток, который должен идти через Mihomo. Сгенерируйте такой трафик и повторите тест."
 
-msgid "The test observes existing LAN TCP flows for up to three short passes. It does not create traffic or change firewall rules."
-msgstr "Тестер наблюдает за существующими LAN TCP-потоками в течение максимум трёх коротких проходов. Он не создаёт трафик и не меняет правила firewall."
+msgid "Mihomo TCP traffic increased, but no growing connection was identified as coming from a processed LAN interface."
+msgstr "Объём TCP-трафика Mihomo вырос, но ни одно растущее соединение не удалось отнести к обрабатываемому LAN-интерфейсу."
+
+msgid "No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic."
+msgstr "За время проверки API Mihomo не показал активных TCP-соединений. Это не исключает передачу трафика по UDP/QUIC."
+
+msgid "The test samples Mihomo TCP connections and conntrack for three 2.5-second intervals. It does not create traffic or change firewall rules; UDP/QUIC is not tested."
+msgstr "Тест проверяет TCP-соединения Mihomo и conntrack в течение трёх интервалов по 2,5 секунды. Он не создаёт трафик и не меняет правила firewall; UDP/QUIC не проверяется."
 
 msgid "This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode."
 msgstr "Тест проверяет приём TCP через TPROXY и доступен только в режимах TPROXY и MIXED."

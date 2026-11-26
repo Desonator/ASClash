@@ -225,6 +225,7 @@ function parseMihomoConnections(result) {
 			const key = `${sourceIP}:${sourcePort}>${destinationIP}:${destinationPort}`;
 			flows.set(key, {
 				key,
+				source: sourceIP,
 				bytes: (Number(connection.upload) || 0) + (Number(connection.download) || 0)
 			});
 		}
@@ -245,13 +246,16 @@ function nftPacketCount(text, chainRule) {
 }
 
 function waitForProbeSample() {
-	return new Promise(resolve => setTimeout(resolve, 1500));
+	return new Promise(resolve => setTimeout(resolve, 2500));
 }
 
 async function runTproxyProbe(settings, updateStatus) {
 	const attempts = 3;
 	const suspectCounts = new Map();
 	let observedCandidates = 0;
+	let observedApiTcpFlows = 0;
+	let observedApiByteGrowth = 0;
+	let conntrackUnavailable = false;
 	const sourceInterfaceCache = new Map();
 	const isLanSource = async address => {
 		if (!sourceInterfaceCache.has(address))
@@ -277,17 +281,14 @@ async function runTproxyProbe(settings, updateStatus) {
 		const apiAfter = parseMihomoConnections(apiAfterResult);
 		if (apiAfter.error) return updateStatus(apiAfter.error, 'error');
 		const conntrackAfter = conntrackTcpFlows(conntrackAfterResult.output);
-		const activeInMihomo = [];
-		let sourceChecks = 0;
+		observedApiTcpFlows = Math.max(observedApiTcpFlows, apiAfter.flows.size);
 		for (const [key, after] of apiAfter.flows) {
 			const before = apiBefore.flows.get(key);
-			const conntrackFlow = conntrackAfter.get(key);
-			if (!before || after.bytes <= before.bytes || !conntrackFlow) continue;
-			if (sourceChecks++ >= 32) break;
-			if (await isLanSource(conntrackFlow.source)) activeInMihomo.push(key);
-		}
-		if (activeInMihomo.length) {
-			return updateStatus(_('TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data.'), 'ok');
+			if (!before || after.bytes <= before.bytes) continue;
+			observedApiByteGrowth++;
+			if (await isLanSource(after.source)) {
+				return updateStatus(_('TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data.'), 'ok');
+			}
 		}
 
 		const movingUnreplied = [];
@@ -306,7 +307,7 @@ async function runTproxyProbe(settings, updateStatus) {
 				suspectCounts.set(key, (suspectCounts.get(key) || 0) + 1);
 		}
 		if (conntrackBeforeResult.code === 6 || conntrackAfterResult.code === 6)
-			return updateStatus(_('Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow.'), 'warning');
+			conntrackUnavailable = true;
 	}
 
 	const repeatedSuspects = [...suspectCounts.values()].filter(count => count >= 2).length;
@@ -314,6 +315,12 @@ async function runTproxyProbe(settings, updateStatus) {
 		return updateStatus(_('Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect.').format(repeatedSuspects), 'warning');
 	if (observedCandidates)
 		return updateStatus(_('Inconclusive: active unanswered LAN flows were seen, but the observations did not consistently match TPROXY counters and Mihomo API connections.'), 'warning');
+	if (conntrackUnavailable)
+		return updateStatus(_('Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow.'), 'warning');
+	if (observedApiByteGrowth)
+		return updateStatus(_('Mihomo TCP traffic increased, but no growing connection was identified as coming from a processed LAN interface.'), 'warning');
+	if (!observedApiTcpFlows)
+		return updateStatus(_('No active TCP connections were visible in the Mihomo API during the test window. This does not rule out UDP/QUIC traffic.'), 'unknown');
 	return updateStatus(_('Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again.'), 'unknown');
 }
 
@@ -617,7 +624,7 @@ return view.extend({
 
 		const tproxyTestAvailable = proxyMode === 'tproxy' || proxyMode === 'mixed';
 		const tproxyTestMessage = E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, tproxyTestAvailable
-			? _('The test observes existing LAN TCP flows for up to three short passes. It does not create traffic or change firewall rules.')
+			? _('The test samples Mihomo TCP connections and conntrack for three 2.5-second intervals. It does not create traffic or change firewall rules; UDP/QUIC is not tested.')
 			: _('This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode.'));
 		const tproxyTestButton = E('button', {
 			'class': 'btn',
