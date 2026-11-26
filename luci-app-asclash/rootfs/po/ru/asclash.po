@@ -1374,3 +1374,55 @@ msgstr "Проверьте порт dnsmasq, цепочку dns_redirect и си
 msgid "Forced DNS redirect rules (TCP/UDP 53)"
 msgstr "Правила перенаправления DNS (TCP/UDP 53)"
 
+
+msgid "Unsupported Mihomo API endpoint."
+msgstr "Неподдерживаемый адрес API Mihomo."
+
+msgid "Mihomo API authentication failed (HTTP %d)."
+msgstr "Ошибка авторизации API Mihomo (HTTP %d)."
+
+msgid "Mihomo API returned HTTP %d while checking connections."
+msgstr "API Mihomo вернул HTTP %d при проверке соединений."
+
+msgid "Mihomo API did not respond while checking connections."
+msgstr "API Mihomo не ответил при проверке соединений."
+
+msgid "Mihomo API returned an unexpected connections response."
+msgstr "API Mihomo вернул неожиданный ответ со списком соединений."
+
+msgid "TPROXY test: sampling active LAN TCP traffic, pass %d of %d…"
+msgstr "Тест TPROXY: наблюдение за активным LAN TCP-трафиком, проход %d из %d…"
+
+msgid "TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data."
+msgstr "TPROXY подтверждён: активное LAN TCP-соединение появилось в Mihomo и передавало данные."
+
+msgid "Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect."
+msgstr "Возможен сбой приёма TPROXY: %d повторно передаваемых LAN-потоков не появились в Mihomo при росте счётчиков TPROXY. Это предупреждение, а не доказательство дефекта ядра."
+
+msgid "Inconclusive: active unanswered LAN flows were seen, but the observations did not consistently match TPROXY counters and Mihomo API connections."
+msgstr "Результат не определён: обнаружены активные LAN-потоки без ответа, но наблюдения не дали устойчивого совпадения со счётчиками TPROXY и соединениями API Mihomo."
+
+msgid "Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again."
+msgstr "Результат не определён: не удалось сопоставить активный LAN TCP-поток, который должен идти через Mihomo. Сгенерируйте такой трафик и повторите тест."
+
+msgid "The test observes existing LAN TCP flows for up to three short passes. It does not create traffic or change firewall rules."
+msgstr "Тестер наблюдает за существующими LAN TCP-потоками в течение максимум трёх коротких проходов. Он не создаёт трафик и не меняет правила firewall."
+
+msgid "This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode."
+msgstr "Тест проверяет приём TCP через TPROXY и доступен только в режимах TPROXY и MIXED."
+
+msgid "The TPROXY test could not complete; check API access and system diagnostics."
+msgstr "Тест TPROXY не удалось завершить; проверьте доступность API и системную диагностику."
+
+msgid "Test TPROXY reception"
+msgstr "Проверить приём TPROXY"
+
+msgid "TPROXY reception test"
+msgstr "Проверка приёма TPROXY"
+
+msgid "The configured API secret contains unsupported line breaks."
+msgstr "Заданный секрет API содержит неподдерживаемые символы перевода строки."
+
+msgid "Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow."
+msgstr "Результат не определён: ядро не предоставляет данные conntrack, необходимые для обнаружения LAN-потока без ответа."
+

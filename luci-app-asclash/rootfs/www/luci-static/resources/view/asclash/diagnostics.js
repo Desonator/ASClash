@@ -4,7 +4,6 @@
 'require view.asclash.utils';
 
 const FILES = {
-	config: '/opt/clash/config.yaml',
 	settings: '/opt/clash/settings',
 	whitelist: '/opt/clash/lst/fakeip-whitelist-summary.txt',
 	grouped: '/opt/clash/lst/fakeip-port-summary.txt',
@@ -105,55 +104,34 @@ function formatForcedDnsCounters(counters) {
 	].join(' · ');
 }
 
-function readYamlScalar(text, key) {
-	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const match = String(text || '').match(new RegExp('^' + escaped + ':\\s*(.*?)\\s*$', 'm'));
-	if (!match) return '';
-	let value = match[1].replace(/\s+#.*$/, '').trim();
-	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
-		value = value.slice(1, -1);
-	return value;
-}
-
-function getLocalMihomoApiUrl(config) {
-	// Diagnostics makes an unauthenticated, read-only request only to loopback;
-	// it never forwards the configured API secret or contacts a remote controller.
-	const plainAddress = readYamlScalar(config, 'external-controller');
-	const tlsAddress = readYamlScalar(config, 'external-controller-tls');
-	const raw = plainAddress || tlsAddress;
-	if (!raw) return { error: _('API controller is not configured.') };
-	try {
-		let address = raw;
-		if (!/^https?:\/\//i.test(address)) {
-			if (address.startsWith(':')) address = '127.0.0.1' + address;
-			else if (address.startsWith('0.0.0.0:')) address = '127.0.0.1:' + address.slice(8);
-			else if (address.startsWith('[::]:')) address = '[::1]:' + address.slice(5);
-			address = (raw === tlsAddress && !plainAddress ? 'https://' : 'http://') + address;
-		}
-		const url = new URL(address);
-		if (url.hostname === '0.0.0.0') url.hostname = '127.0.0.1';
-		if (url.hostname === '::' || url.hostname === '[::]') url.hostname = '[::1]';
-		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname))
-			return { error: _('API check skipped: controller is not bound to loopback.') };
-		url.pathname = url.pathname.replace(/\/$/, '') + '/version';
-		url.search = '';
-		url.hash = '';
-		return { url: url.toString() };
-	} catch (_e) {
-		return { error: _('API controller address is invalid or unsupported.') };
-	}
-}
-
-async function checkMihomoApi(config) {
-	const api = getLocalMihomoApiUrl(config);
-	if (api.error) return { state: 'unknown', detail: api.error };
-	const result = await command('curl', ['-sS', '--noproxy', '*', '--connect-timeout', '2', '--max-time', '4', '-w', '\\n%{http_code}', api.url]);
-	const output = result.output || '';
+function parseApiResponse(result) {
+	const output = String(result && result.output || '');
 	const statusMatch = output.match(/\n(\d{3})\s*$/);
 	const httpStatus = statusMatch ? Number(statusMatch[1]) : 0;
 	const body = statusMatch ? output.slice(0, statusMatch.index) : output;
+	return { httpStatus, body };
+}
+
+async function mihomoApiRequest(endpoint) {
+	if (!['version', 'connections'].includes(endpoint))
+		return { ok: false, code: null, output: '', error: _('Unsupported Mihomo API endpoint.') };
+	return command('/opt/clash/bin/asclash-api', [endpoint]);
+}
+
+function apiHelperError(result) {
+	if (result.code === 3) return _('API controller is not configured.');
+	if (result.code === 4) return _('API check skipped: controller is not bound to loopback.');
+	if (result.code === 5) return _('The configured API secret contains unsupported line breaks.');
+	return '';
+}
+
+async function checkMihomoApi() {
+	const result = await mihomoApiRequest('version');
+	const helperError = apiHelperError(result);
+	if (helperError) return { state: 'unknown', detail: helperError };
+	const { httpStatus, body } = parseApiResponse(result);
 	if (httpStatus === 401 || httpStatus === 403)
-		return { state: 'warning', detail: _('Mihomo API is reachable but requires authentication (HTTP %d).').format(httpStatus) };
+		return { state: 'error', detail: _('Mihomo API authentication failed (HTTP %d).').format(httpStatus) };
 	if (!result.ok || httpStatus < 200 || httpStatus >= 300)
 		return { state: 'error', detail: httpStatus ? _('API returned HTTP %d.').format(httpStatus) : _('Mihomo API did not respond.') };
 	try {
@@ -163,6 +141,180 @@ async function checkMihomoApi(config) {
 	} catch (_e) {
 		return { state: 'warning', detail: _('API returned an unexpected response (HTTP %d).').format(httpStatus) };
 	}
+}
+
+function settingValue(settings, key) {
+	const match = String(settings || '').match(new RegExp('^' + key + '=(.*)$', 'm'));
+	return match ? match[1].trim() : '';
+}
+
+async function isHandledLanSource(sourceIP, settings) {
+	if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(sourceIP)) return false;
+	const route = await command('/sbin/ip', ['-4', 'route', 'get', sourceIP]);
+	const devMatch = route.output.match(/\bdev\s+(\S+)/);
+	if (!route.ok || !devMatch || devMatch[1] === 'lo') return false;
+	const iface = devMatch[1];
+	const mode = settingValue(settings, 'INTERFACE_MODE').toLowerCase();
+	const included = new Set(settingValue(settings, 'INCLUDED_INTERFACES').split(',').map(item => item.trim()).filter(Boolean));
+	const excluded = new Set(settingValue(settings, 'EXCLUDED_INTERFACES').split(',').map(item => item.trim()).filter(Boolean));
+	if (mode === 'explicit') {
+		if (settingValue(settings, 'AUTO_DETECT_LAN') === 'true') {
+			const detected = settingValue(settings, 'DETECTED_LAN');
+			if (detected) included.add(detected);
+		}
+		return included.has(iface);
+	}
+	if (mode === 'exclude') {
+		if (settingValue(settings, 'AUTO_DETECT_WAN') === 'true') {
+			const detected = settingValue(settings, 'DETECTED_WAN');
+			if (detected) excluded.add(detected);
+		}
+		return !excluded.has(iface);
+	}
+	return false;
+}
+
+function conntrackTcpFlows(text) {
+	const flows = new Map();
+	for (const line of String(text || '').split(/\r?\n/)) {
+		if (!/\btcp\b/.test(line)) continue;
+		const fields = [...line.matchAll(/(?:^|\s)(src|dst|sport|dport|packets|bytes)=([^\s]+)/g)];
+		const tuple = {};
+		const packetValues = [];
+		const byteValues = [];
+		for (const [, key, value] of fields) {
+			if (['src', 'dst', 'sport', 'dport'].includes(key) && tuple[key] == null) tuple[key] = value;
+			else if (key === 'packets') packetValues.push(Number(value) || 0);
+			else if (key === 'bytes') byteValues.push(Number(value) || 0);
+		}
+		if (!tuple.src || !tuple.dst || !tuple.sport || !tuple.dport) continue;
+		const key = `${tuple.src}:${tuple.sport}>${tuple.dst}:${tuple.dport}`;
+		flows.set(key, {
+			key,
+			source: tuple.src,
+			packets: packetValues[0] || 0,
+			bytes: byteValues[0] || 0,
+			accounting: packetValues.length > 0 || byteValues.length > 0,
+			synSent: /\bSYN_SENT\b/.test(line),
+			unreplied: /\[UNREPLIED\]/.test(line)
+		});
+	}
+	return flows;
+}
+
+function parseMihomoConnections(result) {
+	const helperError = apiHelperError(result);
+	if (helperError) return { error: helperError };
+	const { httpStatus, body } = parseApiResponse(result);
+	if (httpStatus === 401 || httpStatus === 403)
+		return { error: _('Mihomo API authentication failed (HTTP %d).').format(httpStatus) };
+	if (!result.ok || httpStatus < 200 || httpStatus >= 300)
+		return { error: httpStatus ? _('Mihomo API returned HTTP %d while checking connections.').format(httpStatus) : _('Mihomo API did not respond while checking connections.') };
+	try {
+		const payload = JSON.parse(body || '{}');
+		const connections = Array.isArray(payload.connections) ? payload.connections : [];
+		const flows = new Map();
+		for (const connection of connections) {
+			const metadata = connection.metadata || {};
+			if (String(metadata.network || '').toUpperCase() !== 'TCP') continue;
+			const sourceIP = String(metadata.sourceIP || '').replace(/^::ffff:/i, '');
+			const destinationIP = String(metadata.destinationIP || '').replace(/^::ffff:/i, '');
+			const sourcePort = String(metadata.sourcePort || '');
+			const destinationPort = String(metadata.destinationPort || '');
+			if (!sourceIP || !destinationIP || !sourcePort || !destinationPort) continue;
+			const key = `${sourceIP}:${sourcePort}>${destinationIP}:${destinationPort}`;
+			flows.set(key, {
+				key,
+				bytes: (Number(connection.upload) || 0) + (Number(connection.download) || 0)
+			});
+		}
+		return { flows };
+	} catch (_e) {
+		return { error: _('Mihomo API returned an unexpected connections response.') };
+	}
+}
+
+function nftPacketCount(text, chainRule) {
+	let total = 0;
+	for (const line of String(text || '').split(/\r?\n/)) {
+		if (chainRule && !chainRule.test(line)) continue;
+		const match = line.match(/counter\s+packets\s+(\d+)/i);
+		if (match) total += Number(match[1]) || 0;
+	}
+	return total;
+}
+
+function waitForProbeSample() {
+	return new Promise(resolve => setTimeout(resolve, 1500));
+}
+
+async function runTproxyProbe(settings, updateStatus) {
+	const attempts = 3;
+	const suspectCounts = new Map();
+	let observedCandidates = 0;
+	const sourceInterfaceCache = new Map();
+	const isLanSource = async address => {
+		if (!sourceInterfaceCache.has(address))
+			sourceInterfaceCache.set(address, await isHandledLanSource(address, settings));
+		return sourceInterfaceCache.get(address);
+	};
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		updateStatus(_('TPROXY test: sampling active LAN TCP traffic, pass %d of %d…').format(attempt, attempts), 'warning');
+		const [conntrackBeforeResult, apiBeforeResult, nftBefore] = await Promise.all([
+			command('/opt/clash/bin/asclash-api', ['conntrack']),
+			mihomoApiRequest('connections'),
+			command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'proxy'])
+		]);
+		const apiBefore = parseMihomoConnections(apiBeforeResult);
+		if (apiBefore.error) return updateStatus(apiBefore.error, 'error');
+		const conntrackBefore = conntrackTcpFlows(conntrackBeforeResult.output);
+		await waitForProbeSample();
+		const [conntrackAfterResult, apiAfterResult, nftAfter] = await Promise.all([
+			command('/opt/clash/bin/asclash-api', ['conntrack']),
+			mihomoApiRequest('connections'),
+			command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'proxy'])
+		]);
+		const apiAfter = parseMihomoConnections(apiAfterResult);
+		if (apiAfter.error) return updateStatus(apiAfter.error, 'error');
+		const conntrackAfter = conntrackTcpFlows(conntrackAfterResult.output);
+		const activeInMihomo = [];
+		let sourceChecks = 0;
+		for (const [key, after] of apiAfter.flows) {
+			const before = apiBefore.flows.get(key);
+			const conntrackFlow = conntrackAfter.get(key);
+			if (!before || after.bytes <= before.bytes || !conntrackFlow) continue;
+			if (sourceChecks++ >= 32) break;
+			if (await isLanSource(conntrackFlow.source)) activeInMihomo.push(key);
+		}
+		if (activeInMihomo.length) {
+			return updateStatus(_('TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data.'), 'ok');
+		}
+
+		const movingUnreplied = [];
+		for (const [key, after] of conntrackAfter) {
+			const before = conntrackBefore.get(key);
+			if (!before || !before.accounting || !after.accounting) continue;
+			if ((after.packets > before.packets || after.bytes > before.bytes) && after.synSent && after.unreplied && !apiAfter.flows.has(key) && await isLanSource(after.source))
+				movingUnreplied.push(key);
+		}
+		observedCandidates += movingUnreplied.length;
+		const tproxyDelta = nftAfter.ok && nftBefore.ok
+			? nftPacketCount(nftAfter.output) - nftPacketCount(nftBefore.output)
+			: 0;
+		if (tproxyDelta > 0) {
+			for (const key of movingUnreplied)
+				suspectCounts.set(key, (suspectCounts.get(key) || 0) + 1);
+		}
+		if (conntrackBeforeResult.code === 6 || conntrackAfterResult.code === 6)
+			return updateStatus(_('Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow.'), 'warning');
+	}
+
+	const repeatedSuspects = [...suspectCounts.values()].filter(count => count >= 2).length;
+	if (repeatedSuspects)
+		return updateStatus(_('Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect.').format(repeatedSuspects), 'warning');
+	if (observedCandidates)
+		return updateStatus(_('Inconclusive: active unanswered LAN flows were seen, but the observations did not consistently match TPROXY counters and Mihomo API connections.'), 'warning');
+	return updateStatus(_('Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again.'), 'unknown');
 }
 
 function formatGroupedSkipReason(reason) {
@@ -305,7 +457,7 @@ return view.extend({
 			command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'dns_redirect'])
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
-		const api = await checkMihomoApi(files[FILES.config]);
+		const api = await checkMihomoApi();
 		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, dnsRedirect, api, checkedAt: new Date().toLocaleString() };
 	},
 
@@ -463,6 +615,30 @@ return view.extend({
 			].filter(Boolean))
 		].filter(Boolean)));
 
+		const tproxyTestAvailable = proxyMode === 'tproxy' || proxyMode === 'mixed';
+		const tproxyTestMessage = E('p', { 'class': 'cbi-section-descr', 'style': 'margin:8px 0 0;' }, tproxyTestAvailable
+			? _('The test observes existing LAN TCP flows for up to three short passes. It does not create traffic or change firewall rules.')
+			: _('This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode.'));
+		const tproxyTestButton = E('button', {
+			'class': 'btn',
+			'disabled': !tproxyTestAvailable,
+			'click': async function() {
+				tproxyTestButton.disabled = true;
+				try {
+					await runTproxyProbe(files[FILES.settings] || '', (message, state) => {
+						tproxyTestMessage.textContent = message;
+						tproxyTestMessage.style.color = state === 'ok' ? '#198754' : state === 'error' ? '#b42336' : state === 'warning' ? '#b7791f' : '';
+					});
+				} catch (_e) {
+					tproxyTestMessage.textContent = _('The TPROXY test could not complete; check API access and system diagnostics.');
+					tproxyTestMessage.style.color = '#b42336';
+				} finally {
+					tproxyTestButton.disabled = !tproxyTestAvailable;
+				}
+			}
+		}, _('Test TPROXY reception'));
+		const tproxyTestCard = card(_('TPROXY reception test'), E('div', {}, [tproxyTestButton, tproxyTestMessage]));
+
 		const warningContent = warnings.length
 			? E('pre', { 'style': 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;' }, warnings.join('\n'))
 			: E('p', { 'class': 'cbi-section-descr' }, _('No parser or firewall warnings found in the current system log buffer.'));
@@ -480,6 +656,7 @@ return view.extend({
 			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode.')),
 			card(_('Overall status'), summary, 'padding-bottom:5px;'),
 			modeCard,
+			tproxyTestCard,
 			listsCard,
 			warningCard
 		]);

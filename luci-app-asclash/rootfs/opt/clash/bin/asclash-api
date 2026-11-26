@@ -1,0 +1,120 @@
+#!/bin/sh
+
+# Read-only local Mihomo API client for LuCI diagnostics.
+# Reads the API secret inside this helper and stores its curl config in a
+# private tmpfs file, so the secret never appears in argv, output, or logs.
+
+CONFIG_FILE="/opt/clash/config.yaml"
+
+yaml_scalar() {
+	awk -v wanted="$1" '
+	function trim(value) {
+		sub(/^[ \t]+/, "", value)
+		sub(/[ \t]+$/, "", value)
+		return value
+	}
+	function decode_quoted(value, quote, result, i, ch, next) {
+		result = ""
+		for (i = 2; i <= length(value); i++) {
+			ch = substr(value, i, 1)
+			if (quote == "\047" && ch == "\047" && substr(value, i + 1, 1) == "\047") {
+				result = result "\047"
+				i++
+				continue
+			}
+			if (ch == quote) break
+			if (quote == "\"" && ch == "\\") {
+				next = substr(value, ++i, 1)
+				if (next == "n") result = result "\n"
+				else if (next == "r") result = result "\r"
+				else if (next == "t") result = result "\t"
+				else result = result next
+			} else result = result ch
+		}
+		return result
+	}
+	/^[^ \t#][^:]*:/ {
+		name = $0
+		sub(/:.*/, "", name)
+		if (name != wanted) next
+		value = substr($0, index($0, ":") + 1)
+		value = trim(value)
+		first = substr(value, 1, 1)
+		if (first == "\"" || first == "\047") {
+			print decode_quoted(value, first)
+			exit
+		}
+		sub(/[ \t]+#.*/, "", value)
+		print trim(value)
+		exit
+	}
+	' "$CONFIG_FILE"
+}
+
+case "${1:-}" in
+	version) endpoint="version" ;;
+	connections) endpoint="connections" ;;
+	conntrack)
+		[ -r /proc/net/nf_conntrack ] || exit 6
+		awk '/^ipv4 2 tcp / && (/ESTABLISHED/ || /SYN_SENT/ || /TIME_WAIT/) { print; n++; if (n >= 128) exit }' /proc/net/nf_conntrack
+		exit $?
+		;;
+	*) exit 2 ;;
+esac
+
+[ -r "$CONFIG_FILE" ] || exit 1
+
+controller=$(yaml_scalar external-controller)
+tls_controller=$(yaml_scalar external-controller-tls)
+secret=$(yaml_scalar secret)
+
+if [ -n "$controller" ]; then
+	protocol="http"
+	address="$controller"
+else
+	protocol="https"
+	address="$tls_controller"
+fi
+[ -n "$address" ] || exit 3
+
+case "$address" in
+	http://*) protocol="http"; address=${address#http://} ;;
+	https://*) protocol="https"; address=${address#https://} ;;
+esac
+
+case "$address" in
+	0.0.0.0:*) address="127.0.0.1:${address#*:}" ;;
+	\[::\]:*) address="[::1]:${address#*]:}" ;;
+	:*) address="127.0.0.1$address" ;;
+esac
+
+case "$protocol://$address" in
+	http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*) ;;
+	*) exit 4 ;;
+esac
+
+umask 077
+auth_config=$(mktemp /tmp/asclash-api.XXXXXX) || exit 1
+trap 'rm -f "$auth_config"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ -n "$secret" ]; then
+	newline=$(printf '\nX')
+	newline=${newline%X}
+	carriage_return=$(printf '\r')
+	case "$secret" in
+		*"$newline"*|*"$carriage_return"*) exit 5 ;;
+	esac
+	# Escape curl-config quoted-string syntax; keep the token only in this
+	# mode-600 file on tmpfs, never on the command line.
+	escaped_secret=$(printf '%s' "$secret" | sed 's/\\/\\\\/g; s/"/\\"/g') || exit 1
+	printf 'header = "Authorization: Bearer %s"\n' "$escaped_secret" > "$auth_config" || exit 1
+fi
+
+max_time=4
+[ "$endpoint" = "connections" ] && max_time=2
+curl --silent --show-error --noproxy '*' --connect-timeout 2 --max-time "$max_time" \
+	--config "$auth_config" --write-out '\n%{http_code}' \
+	"$protocol://$address/$endpoint"

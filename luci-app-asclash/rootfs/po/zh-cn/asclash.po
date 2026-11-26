@@ -1340,3 +1340,55 @@ msgstr "请检查 dnsmasq 的 53 端口、dns_redirect 链和系统日志。"
 msgid "Forced DNS redirect rules (TCP/UDP 53)"
 msgstr "强制 DNS 重定向规则（TCP/UDP 53）"
 
+
+msgid "Unsupported Mihomo API endpoint."
+msgstr "不支持的 Mihomo API 端点。"
+
+msgid "Mihomo API authentication failed (HTTP %d)."
+msgstr "Mihomo API 身份验证失败（HTTP %d）。"
+
+msgid "Mihomo API returned HTTP %d while checking connections."
+msgstr "检查连接时 Mihomo API 返回 HTTP %d。"
+
+msgid "Mihomo API did not respond while checking connections."
+msgstr "检查连接时 Mihomo API 未响应。"
+
+msgid "Mihomo API returned an unexpected connections response."
+msgstr "Mihomo API 返回了意外的连接列表响应。"
+
+msgid "TPROXY test: sampling active LAN TCP traffic, pass %d of %d…"
+msgstr "TPROXY 测试：正在采样 LAN TCP 活动流量，第 %d/%d 轮……"
+
+msgid "TPROXY confirmed: an active LAN TCP connection appeared in Mihomo and transferred data."
+msgstr "已确认 TPROXY：活动 LAN TCP 连接出现在 Mihomo 中并传输了数据。"
+
+msgid "Possible TPROXY receive issue: %d retransmitting LAN flow(s) were not visible in Mihomo while TPROXY counters increased. This is a warning, not proof of a kernel defect."
+msgstr "可能存在 TPROXY 接收问题：TPROXY 计数器增长时，有 %d 个重传 LAN 流未出现在 Mihomo 中。这只是警告，并不能证明内核存在缺陷。"
+
+msgid "Inconclusive: active unanswered LAN flows were seen, but the observations did not consistently match TPROXY counters and Mihomo API connections."
+msgstr "结论不确定：检测到活动但无响应的 LAN 流，但观测结果未能稳定匹配 TPROXY 计数器与 Mihomo API 连接。"
+
+msgid "Inconclusive: no active proxied LAN TCP flow could be correlated. Generate traffic to a destination expected to use Mihomo and run the test again."
+msgstr "结论不确定：无法关联到活动的代理 LAN TCP 流。请访问预期经 Mihomo 代理的目标后重试。"
+
+msgid "The test observes existing LAN TCP flows for up to three short passes. It does not create traffic or change firewall rules."
+msgstr "测试最多分三轮短暂观察现有 LAN TCP 流量，不会生成流量或修改防火墙规则。"
+
+msgid "This test checks TPROXY TCP reception and is available only in TPROXY or MIXED mode."
+msgstr "此测试检查 TPROXY TCP 接收，仅适用于 TPROXY 或 MIXED 模式。"
+
+msgid "The TPROXY test could not complete; check API access and system diagnostics."
+msgstr "TPROXY 测试未能完成；请检查 API 访问和系统诊断。"
+
+msgid "Test TPROXY reception"
+msgstr "测试 TPROXY 接收"
+
+msgid "TPROXY reception test"
+msgstr "TPROXY 接收测试"
+
+msgid "The configured API secret contains unsupported line breaks."
+msgstr "配置的 API 密钥包含不支持的换行符。"
+
+msgid "Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow."
+msgstr "结论不确定：此内核未提供识别无响应 LAN 流所需的 conntrack 数据。"
+
