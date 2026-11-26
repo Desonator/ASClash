@@ -1419,3 +1419,42 @@ msgstr "配置的 API 密钥包含不支持的换行符。"
 msgid "Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow."
 msgstr "结论不确定：此内核未提供识别无响应 LAN 流所需的 conntrack 数据。"
 
+msgid "Direct routing for reserved DHCP devices"
+msgstr "为固定 DHCP 租约设备直连"
+
+msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
+msgstr "所选设备将在开头的 REJECT 规则之后添加受 ASClash 管理的 SRC-IP-CIDR,DIRECT 规则。设备流量先经过 Mihomo，以保留 Fake-IP 域名映射，然后通过 DIRECT 出站。列表仅显示永久 IPv4 DHCP 保留租约。QUIC 阻止仍然生效。"
+
+msgid "Could not read DHCP reservations. Existing managed rules will be preserved; device selection is unavailable."
+msgstr "无法读取 DHCP 保留租约。现有托管规则将保留，设备选择不可用。"
+
+msgid "These generated rules have no matching permanent DHCP reservation and will be removed when settings are saved: %s"
+msgstr "以下生成规则没有对应的永久 DHCP 保留租约，保存设置时将被移除：%s"
+
+msgid "No permanent IPv4 DHCP reservations with MAC addresses were found."
+msgstr "未找到带 MAC 地址的永久 IPv4 DHCP 保留租约。"
+
+msgid "Unnamed device"
+msgstr "未命名设备"
+
+msgid "More than one ASClash device-direct block was found."
+msgstr "配置中发现多个 ASClash 设备 DIRECT 规则块。"
+
+msgid "The ASClash device-direct block markers are incomplete; repair the marked section in config.yaml before saving."
+msgstr "ASClash 设备 DIRECT 规则块标记不完整，请先修复 config.yaml 中的标记区域再保存。"
+
+msgid "The rules section uses an unsupported YAML form; add a standalone rules: key before enabling device-direct rules."
+msgstr "rules 部分使用了不支持的 YAML 格式。启用设备 DIRECT 规则前，请添加独立的 rules: 键。"
+
+msgid "Move all REJECT/REJECT-DROP rules before other routing rules so they retain priority over device DIRECT rules."
+msgstr "请将所有 REJECT/REJECT-DROP 规则移到其他路由规则之前，以确保其优先于设备 DIRECT 规则。"
+
+msgid "Cannot add device-direct rules because config.yaml is empty."
+msgstr "config.yaml 为空，无法添加设备 DIRECT 规则。"
+
+msgid "DHCP reservations changed while this page was open. Reload the page and select the device again."
+msgstr "页面打开期间 DHCP 保留租约已更改。请刷新页面并重新选择设备。"
+
+msgid "Could not re-check DHCP reservations; settings were not saved."
+msgstr "无法重新检查 DHCP 保留租约；设置未保存。"
+

@@ -19,6 +19,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Fake-IP IP-CIDR | Builds an IPv4 list from referenced rule providers and supported inline rules. LuCI shows per-provider counts and an FAQ; manual entries outside the generated block are preserved. |
 | Forced DNS | Redirects client IPv4 TCP/UDP requests to router port 53 and reports active rules and conntrack-flow counters in Diagnostics. It follows interface-processing scope and exempts DIRECT sources. |
 | Grouped AND rules | Supported `AND` rules are translated into IPv4 nftables sets and compact protocol/port rules. Matching sources/sets can be reused while TCP/UDP and port conditions stay separate. |
+| Per-device DIRECT | Settings can select a device with a permanent IPv4 DHCP reservation. ASClash adds a marked `SRC-IP-CIDR,...,DIRECT` rule to Mihomo and sends that device's traffic through the core so Fake-IP domain mapping is preserved before DIRECT. It applies only on processed interfaces; QUIC blocking still takes precedence. |
 | Smart groups | An optional Status-page widget displays servers and weights for `type: smart` groups when the selected core exposes the required API. |
 | Kernel source | The installer offers official Mihomo or Prizrak-Core. The selection is saved in settings; router architecture is detected automatically. |
 | Service operation | Status notifications report service restarts and rule-list generation/application; the configuration page includes service controls and a dashboard link. |

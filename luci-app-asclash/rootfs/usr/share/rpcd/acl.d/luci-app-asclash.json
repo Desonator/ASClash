@@ -44,7 +44,8 @@
             "ubus": {
                 "file": [ "read", "stat", "exec" ],
                 "service": [ "list" ]
-            }
+            },
+            "uci": [ "dhcp" ]
         },
         "write": {
             "file": {

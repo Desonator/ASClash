@@ -3,6 +3,7 @@
 'require fs';
 'require ui';
 'require network';
+'require uci';
 'require view.asclash.utils';
 
 view_asclash_utils.bumpRpcTimeout();
@@ -512,6 +513,182 @@ async function loadSettings() {
     }
 }
 
+function normalizeDhcpIPv4(value) {
+    const parts = String(value || '').trim().split('.');
+    if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part) || Number(part) > 255))
+        return null;
+    return parts.map(part => String(Number(part))).join('.');
+}
+
+async function getPermanentDhcpDevices() {
+    await uci.load('dhcp');
+    const byIp = new Map();
+    for (const host of uci.sections('dhcp', 'host') || []) {
+        const ip = normalizeDhcpIPv4(host.ip);
+        const macs = (Array.isArray(host.mac) ? host.mac : [host.mac])
+            .map(mac => String(mac || '').trim().toLowerCase())
+            .filter(mac => /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac));
+        if (!ip || !macs.length) continue;
+
+        const item = byIp.get(ip) || { ip, name: '', macs: [] };
+        item.name = item.name || String(host.name || '').trim();
+        item.macs = [...new Set(item.macs.concat(macs))];
+        byIp.set(ip, item);
+    }
+    return [...byIp.values()].sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+}
+
+function getManagedDirectIPs(config) {
+    const result = new Set();
+    for (const line of String(config || '').split(/\r?\n/)) {
+        if (!line.includes('# ASCLASH:DEVICE-DIRECT')) continue;
+        const rule = line.replace(/#.*/, '').trim();
+        const match = rule.match(/^-\s*SRC-IP-CIDR\s*,\s*([^,\s]+)\s*,\s*DIRECT\s*$/i);
+        if (!match || !match[1].endsWith('/32')) continue;
+        const ip = normalizeDhcpIPv4(match[1].slice(0, -3));
+        if (ip) result.add(ip);
+    }
+    return [...result].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function ruleTarget(rule) {
+    let depth = 0;
+    const commas = [];
+    for (let i = 0; i < rule.length; i++) {
+        if (rule[i] === '(') depth++;
+        else if (rule[i] === ')') depth--;
+        else if (rule[i] === ',' && depth === 0) commas.push(i);
+    }
+    if (!commas.length) return '';
+    const actionSeparator = commas.length > 1 ? commas[1] : commas[0];
+    return rule.slice(actionSeparator + 1).split(',')[0].trim().replace(/^['"]|['"]$/g, '').toUpperCase();
+}
+
+function applyManagedDirectRules(config, selectedIPs) {
+    const beginMarker = '  # ASCLASH:DEVICE-DIRECT-BEGIN';
+    const endMarker = '  # ASCLASH:DEVICE-DIRECT-END';
+    const lines = String(config || '').replace(/\r\n/g, '\n').split('\n');
+    let begin = -1;
+    let end = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === beginMarker.trim()) {
+            if (begin !== -1) throw new Error(_('More than one ASClash device-direct block was found.'));
+            begin = i;
+        } else if (lines[i].trim() === endMarker.trim()) {
+            if (end !== -1) throw new Error(_('More than one ASClash device-direct block was found.'));
+            end = i;
+        }
+    }
+    if ((begin === -1) !== (end === -1) || (begin !== -1 && end < begin))
+        throw new Error(_('The ASClash device-direct block markers are incomplete; repair the marked section in config.yaml before saving.'));
+    if (begin !== -1) lines.splice(begin, end - begin + 1);
+
+    const ips = [...new Set((selectedIPs || []).map(normalizeDhcpIPv4).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!ips.length) return lines.join('\n');
+
+    const rulesIndex = lines.findIndex(line => /^rules:\s*(?:#.*)?$/.test(line));
+    if (rulesIndex === -1) {
+        if (lines.some(line => /^rules\s*:/.test(line)))
+            throw new Error(_('The rules section uses an unsupported YAML form; add a standalone rules: key before enabling device-direct rules.'));
+        const prefix = lines.join('\n').replace(/\n*$/, '\n\n');
+        return prefix + ['rules:', beginMarker,
+            ...ips.map(ip => `  - SRC-IP-CIDR,${ip}/32,DIRECT # ASCLASH:DEVICE-DIRECT`),
+            endMarker, ''].join('\n');
+    }
+
+    let firstRule = -1;
+    const leadingPolicyIndices = [];
+    let nonRejectSeen = false;
+    for (let i = rulesIndex + 1; i < lines.length; i++) {
+        if (/^[^\s#][^:]*:/.test(lines[i])) break;
+        const match = lines[i].match(/^\s*-\s*(.*)$/);
+        if (!match) continue;
+        if (firstRule === -1) firstRule = i;
+        const target = ruleTarget(match[1].replace(/\s+#.*$/, ''));
+        const isReject = target === 'REJECT' || target.startsWith('REJECT-');
+        if (isReject) {
+            if (nonRejectSeen)
+                throw new Error(_('Move all REJECT/REJECT-DROP rules before other routing rules so they retain priority over device DIRECT rules.'));
+            leadingPolicyIndices.push(i);
+        } else if (target === 'PASS') {
+            if (!nonRejectSeen) leadingPolicyIndices.push(i);
+        } else {
+            nonRejectSeen = true;
+        }
+    }
+
+    const indent = firstRule === -1 ? '  ' : (lines[firstRule].match(/^\s*/) || ['  '])[0];
+    const insertAt = leadingPolicyIndices.length ? leadingPolicyIndices[leadingPolicyIndices.length - 1] + 1 : (firstRule === -1 ? rulesIndex + 1 : firstRule);
+    const block = [
+        `${indent}# ASCLASH:DEVICE-DIRECT-BEGIN`,
+        `${indent}# Generated from permanent DHCP reservations; packets enter Mihomo and use its DIRECT rule.`,
+        ...ips.map(ip => `${indent}- SRC-IP-CIDR,${ip}/32,DIRECT # ASCLASH:DEVICE-DIRECT`),
+        `${indent}# ASCLASH:DEVICE-DIRECT-END`
+    ];
+    lines.splice(insertAt, 0, ...block);
+    return lines.join('\n');
+}
+
+function createDeviceDirectSection(dhcpDevices, existingIPs, dhcpAvailable) {
+    const container = E('section', {
+        'class': 'cbi-section',
+        'style': 'margin:12px 0;padding:12px;border:1px solid ' + PANEL_BORDER + ';border-radius:5px;background:' + PANEL_CARD_BG + ';color:' + PANEL_TEXT + ';'
+    });
+    container.appendChild(E('h3', { 'style': 'margin:0 0 6px;' }, _('Direct routing for reserved DHCP devices')));
+    container.appendChild(E('p', { 'class': 'cbi-section-descr', 'style': 'margin:0 0 10px;' },
+        _('Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies.')));
+
+    if (!dhcpAvailable) {
+        container.appendChild(E('p', { 'style': 'color:#b42336;margin:0;' },
+            _('Could not read DHCP reservations. Existing managed rules will be preserved; device selection is unavailable.')));
+        return { element: container, getSelectedDevices: function() { return null; } };
+    }
+
+    const byIp = new Map(dhcpDevices.map(device => [device.ip, device]));
+    const devices = dhcpDevices.slice();
+    devices.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+    const staleIPs = existingIPs.filter(ip => !byIp.has(ip));
+    if (staleIPs.length) {
+        container.appendChild(E('p', { 'style': 'color:#b7791f;margin:0 0 8px;' },
+            _('These generated rules have no matching permanent DHCP reservation and will be removed when settings are saved: %s').format(staleIPs.join(', '))));
+    }
+
+    const selections = [];
+    if (!devices.length) {
+        container.appendChild(E('p', { 'style': 'margin:0;' }, _('No permanent IPv4 DHCP reservations with MAC addresses were found.')));
+    } else {
+        const grid = E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:7px;' });
+        for (const device of devices) {
+            const id = 'managed-direct-' + device.ip.replace(/[^0-9]/g, '-');
+            const checkbox = E('input', { 'type': 'checkbox', 'id': id, 'value': device.ip });
+            checkbox.checked = existingIPs.includes(device.ip);
+            const macText = device.macs.length ? device.macs.join(', ') : _('reservation missing');
+            const label = E('label', {
+                'for': id,
+                'style': 'display:flex;align-items:center;gap:8px;padding:8px;border:1px solid ' + PANEL_BORDER_ITEM + ';border-radius:4px;cursor:pointer;background:' + PANEL_ITEM_BG + ';color:' + PANEL_TEXT + ';'
+            }, [
+                checkbox,
+                E('span', {}, [
+                    E('strong', {}, device.name || _('Unnamed device')),
+                    E('br'),
+                    E('small', {}, `${device.ip} · ${macText}`)
+                ])
+            ]);
+            grid.appendChild(label);
+            selections.push({ checkbox, device });
+        }
+        container.appendChild(grid);
+    }
+
+    return {
+        element: container,
+        getSelectedDevices: function() {
+            return selections.filter(item => item.checkbox.checked).map(item => item.device);
+        }
+    };
+}
+
 async function loadInterfacesByMode(mode) {
     try {
         const settings = await loadSettings();
@@ -529,7 +706,7 @@ async function loadInterfacesByMode(mode) {
     }
 }
 
-async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, forceDnsRedirect, useTmpfsRules, showSmartWeights, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS, mihomoReleaseRepo) {
+async function saveSettings(mode, proxyMode, tunStack, autoDetectLan, autoDetectWan, blockQuic, forceDnsRedirect, useTmpfsRules, showSmartWeights, interfaces, enableHwid, hwidUserAgent, hwidDeviceOS, mihomoReleaseRepo, managedDirectIPs) {
     try {
         let detectedLan = '';
         let detectedWan = '';
@@ -588,6 +765,13 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
                     hwidValues.verOs,
                     hwidValues.deviceModel
                 );
+            }
+
+            if (Array.isArray(managedDirectIPs)) {
+                if (!configContent && managedDirectIPs.length)
+                    throw new Error(_('Cannot add device-direct rules because config.yaml is empty.'));
+                if (configContent)
+                    updatedConfig = applyManagedDirectRules(updatedConfig, managedDirectIPs);
             }
 
             configStage = await view_asclash_utils.stageValidatedConfig(updatedConfig);
@@ -1867,6 +2051,20 @@ return view.extend({
             settings.hwidUserAgent,
             settings.hwidDeviceOS
         );
+        let dhcpDevices = [];
+        let dhcpReservationsAvailable = true;
+        try {
+            dhcpDevices = await getPermanentDhcpDevices();
+        } catch (e) {
+            dhcpReservationsAvailable = false;
+            console.warn('Failed to read static DHCP reservations:', e.message || e);
+        }
+        const currentConfig = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+        const deviceDirectSection = createDeviceDirectSection(
+            dhcpDevices,
+            getManagedDirectIPs(currentConfig),
+            dhcpReservationsAvailable
+        );
         // Kernel management is rendered on the Status page.
 
         const downloadButton = E('button', {
@@ -1971,6 +2169,29 @@ return view.extend({
                 const enableHwid = additionalSettings.querySelector('#enable_hwid')?.checked || false;
                 const hwidUserAgent = additionalSettings.querySelector('#hwid_user_agent')?.value || 'ASClash';
                 const hwidDeviceOS = additionalSettings.querySelector('#hwid_device_os')?.value || 'OpenWrt';
+                const selectedDirectDevices = deviceDirectSection.getSelectedDevices();
+                let managedDirectIPs = null;
+                if (Array.isArray(selectedDirectDevices)) {
+                    try {
+                        const currentReservations = await getPermanentDhcpDevices();
+                        const currentByIP = new Map(currentReservations.map(device => [device.ip, device]));
+                        const reservationChanged = selectedDirectDevices.some(device => {
+                            const current = currentByIP.get(device.ip);
+                            if (!current) return true;
+                            const originalMacs = device.macs.slice().sort().join(',');
+                            const currentMacs = current.macs.slice().sort().join(',');
+                            return originalMacs !== currentMacs;
+                        });
+                        if (reservationChanged) {
+                            ui.addNotification(null, E('p', _('DHCP reservations changed while this page was open. Reload the page and select the device again.')), 'error');
+                            return;
+                        }
+                        managedDirectIPs = selectedDirectDevices.map(device => device.ip);
+                    } catch (e) {
+                        ui.addNotification(null, E('p', _('Could not re-check DHCP reservations; settings were not saved.')), 'error');
+                        return;
+                    }
+                }
 
                 const selected = [];
                 const checkboxes = interfaceSelector.querySelectorAll('input[type="checkbox"]:checked');
@@ -1992,7 +2213,8 @@ return view.extend({
                     enableHwid,
                     hwidUserAgent,
                     hwidDeviceOS,
-                    settings.mihomoReleaseRepo
+                    settings.mihomoReleaseRepo,
+                    managedDirectIPs
                 );
 
                 if (success) {
@@ -2237,6 +2459,7 @@ return view.extend({
             interfaceSelector,
             statusSection,
             additionalSettings,
+            deviceDirectSection.element,
             buttonContainer
         ]);
 

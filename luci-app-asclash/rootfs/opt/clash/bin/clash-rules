@@ -412,8 +412,41 @@ extract_proxy_src_ip_cidrs() {
     extract_src_ip_cidrs_by_action "proxy"
 }
 
+extract_managed_direct_src_ip_cidrs() {
+	[ -f "$CONFIG_FILE" ] || return 0
+	awk '
+	function trim(s) {
+		gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+		gsub(/^['"'"']|['"'"']$/, "", s)
+		return s
+	}
+	/^rules:/ { in_rules = 1; next }
+	/^[a-zA-Z][^[:space:]]*:/ && !/^[[:space:]]/ { in_rules = 0 }
+	in_rules && index($0, "# ASCLASH:DEVICE-DIRECT") {
+		line = $0
+		sub(/#.*/, "", line)
+		gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+		sub(/^-[[:space:]]*/, "", line)
+		if (toupper(substr(line, 1, 12)) != "SRC-IP-CIDR,") next
+		n = split(line, parts, ",")
+		if (n < 3 || toupper(trim(parts[3])) != "DIRECT") next
+		print trim(parts[2])
+	}
+	' "$CONFIG_FILE" | while IFS= read -r cidr; do
+		is_valid_ipv4_cidr "$cidr" && printf '%s\n' "$cidr"
+	done | sort -u
+}
+
 extract_direct_src_ip_cidrs() {
-    extract_src_ip_cidrs_by_action "direct"
+	local direct_src_cidrs managed_direct_src_cidrs
+	direct_src_cidrs=$(extract_src_ip_cidrs_by_action "direct")
+	managed_direct_src_cidrs=$(extract_managed_direct_src_ip_cidrs)
+	[ -n "$managed_direct_src_cidrs" ] || { printf '%s\n' "$direct_src_cidrs"; return 0; }
+	printf '%s\n' "$direct_src_cidrs" | while IFS= read -r cidr; do
+		[ -n "$cidr" ] || continue
+		printf '%s\n' "$managed_direct_src_cidrs" | grep -F -x -q "$cidr" && continue
+		printf '%s\n' "$cidr"
+	done
 }
 
 extract_reject_src_ip_cidrs() {
@@ -2770,6 +2803,38 @@ apply_nft_src_ip_cidr_marking() {
     msg "SRC-IP-CIDR source marking applied for: $(echo "$src_cidrs" | tr '\n' ' ') (UDP mark: $udp_mark)"
 }
 
+# Explicitly managed DHCP-reservation clients are sent through Mihomo even
+# when their matching SRC-IP-CIDR rule targets DIRECT. Mihomo then selects the
+# direct outbound, while Fake-IP mappings still reach the core for domain lookup.
+apply_nft_src_ip_cidr_managed_direct_marking() {
+    local src_cidrs server_ips="$1"
+    src_cidrs=$(extract_managed_direct_src_ip_cidrs)
+    [ -n "$src_cidrs" ] || return 0
+
+    local udp_mark="$MARK_TPROXY"
+    [ "$PROXY_MODE" = "mixed" ] && udp_mark="$MARK_TUN_UDP"
+
+    echo "$src_cidrs" | while IFS= read -r src; do
+        [ -n "$src" ] || continue
+
+        local network ip
+        for network in $RESERVED_NETWORKS; do
+            nft add rule inet clash CLASH_MARK ip saddr "$src" ip daddr "$network" return
+        done
+
+        if [ -n "$server_ips" ]; then
+            echo "$server_ips" | while IFS= read -r ip; do
+                [ -n "$ip" ] && nft add rule inet clash CLASH_MARK ip saddr "$src" ip daddr "$ip" return
+            done
+        fi
+
+        nft add rule inet clash CLASH_MARK ip saddr "$src" meta l4proto tcp counter meta mark set "$MARK_TPROXY"
+        nft add rule inet clash CLASH_MARK ip saddr "$src" meta l4proto udp counter meta mark set "$udp_mark"
+    done
+
+    msg "Managed DHCP DIRECT clients routed through Mihomo: $(echo "$src_cidrs" | tr '\n' ' ') (UDP mark: $udp_mark)"
+}
+
 # For nftables - apply TPROXY rules in proxy chain (mode-aware)
 # TPROXY:  TCP+UDP both redirected via TPROXY port 7894
 # MIXED:   TCP only redirected via TPROXY (mark 0x0001); UDP routed to clash-tun by fwmark 0x0003
@@ -3108,6 +3173,7 @@ apply_nft_rules() {
 
     apply_nft_src_ip_cidr_policy
     apply_nft_src_ip_cidr_marking "$server_ips"
+    apply_nft_src_ip_cidr_managed_direct_marking "$server_ips"
     apply_nft_marking_mangle "$fake_ip_range"
 
     # Apply TPROXY rules

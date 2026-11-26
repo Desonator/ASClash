@@ -5,7 +5,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-asclash
-PKG_VERSION:=4.8.2.38
+PKG_VERSION:=4.8.2.39
 PKG_RELEASE:=1
 PKG_MAINTAINER:=Desonator <https://github.com/Desonator>
 

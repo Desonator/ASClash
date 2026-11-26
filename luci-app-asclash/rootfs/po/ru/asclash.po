@@ -1453,3 +1453,42 @@ msgstr "Заданный секрет API содержит неподдержи�
 msgid "Inconclusive: this kernel does not expose conntrack flow data required to identify an unanswered LAN flow."
 msgstr "Результат не определён: ядро не предоставляет данные conntrack, необходимые для обнаружения LAN-потока без ответа."
 
+msgid "Direct routing for reserved DHCP devices"
+msgstr "Прямой выход устройств с постоянной DHCP-арендой"
+
+msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
+msgstr "Для выбранных устройств создаётся управляемое правило SRC-IP-CIDR,DIRECT после начальных правил REJECT. Их трафик на обрабатываемых ASClash интерфейсах сначала проходит через Mihomo, сохраняя сопоставление Fake-IP с доменом, а затем выходит напрямую. В списке только постоянные IPv4 DHCP-резервации. Блокировка QUIC продолжает действовать."
+
+msgid "Could not read DHCP reservations. Existing managed rules will be preserved; device selection is unavailable."
+msgstr "Не удалось прочитать DHCP-резервации. Существующие управляемые правила сохранятся, выбор устройств недоступен."
+
+msgid "These generated rules have no matching permanent DHCP reservation and will be removed when settings are saved: %s"
+msgstr "Для этих созданных правил нет соответствующей постоянной DHCP-резервации; при сохранении настроек они будут удалены: %s"
+
+msgid "No permanent IPv4 DHCP reservations with MAC addresses were found."
+msgstr "Постоянные IPv4 DHCP-резервации с MAC-адресами не найдены."
+
+msgid "Unnamed device"
+msgstr "Устройство без имени"
+
+msgid "More than one ASClash device-direct block was found."
+msgstr "В конфигурации найдено несколько блоков правил устройств DIRECT от ASClash."
+
+msgid "The ASClash device-direct block markers are incomplete; repair the marked section in config.yaml before saving."
+msgstr "Маркеры блока правил устройств DIRECT от ASClash неполные. Исправьте отмеченный блок в config.yaml перед сохранением."
+
+msgid "The rules section uses an unsupported YAML form; add a standalone rules: key before enabling device-direct rules."
+msgstr "Раздел rules задан в неподдерживаемом формате YAML. Перед включением правил устройств DIRECT добавьте отдельный ключ rules:."
+
+msgid "Move all REJECT/REJECT-DROP rules before other routing rules so they retain priority over device DIRECT rules."
+msgstr "Переместите все правила REJECT/REJECT-DROP перед остальными правилами маршрутизации, чтобы они имели приоритет над правилами DIRECT для устройств."
+
+msgid "Cannot add device-direct rules because config.yaml is empty."
+msgstr "Нельзя добавить правила устройств DIRECT: config.yaml пуст."
+
+msgid "DHCP reservations changed while this page was open. Reload the page and select the device again."
+msgstr "Пока страница была открыта, DHCP-резервации изменились. Обновите страницу и выберите устройство заново."
+
+msgid "Could not re-check DHCP reservations; settings were not saved."
+msgstr "Не удалось повторно проверить DHCP-резервации; настройки не сохранены."
+
