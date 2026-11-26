@@ -668,6 +668,9 @@ msgstr "Служба успешно перезагружена."
 msgid "Service is restarting…"
 msgstr "Служба перезапускается…"
 
+msgid "Clash is starting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
+msgstr "Clash запускается. Сначала применяются кэшированные или уже доступные списки; после запуска ядра списки на основе провайдеров могут обновиться."
+
 msgid "Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
 msgstr "Clash перезапускается. Сначала применяются кэшированные или уже доступные списки; после запуска ядра списки на основе провайдеров могут быть обновлены."
 
@@ -1461,6 +1464,21 @@ msgstr "Для DIRECT по устройствам требуется режим 
 
 msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
 msgstr "Для выбранных устройств создаётся управляемое правило SRC-IP-CIDR,DIRECT после начальных правил REJECT. Их трафик на обрабатываемых ASClash интерфейсах сначала проходит через Mihomo, сохраняя сопоставление Fake-IP с доменом, а затем выходит напрямую. В списке только постоянные IPv4 DHCP-резервации. Блокировка QUIC продолжает действовать."
+
+msgid "Selected traffic still passes through Mihomo and uses DIRECT, preserving Fake-IP. Applies only on ASClash-processed interfaces; earlier REJECT/PASS rules and enabled QUIC blocking take priority."
+msgstr "Трафик выбранных устройств по-прежнему проходит через Mihomo и выходит напрямую, сохраняя обработку Fake-IP. Действует только на обрабатываемых ASClash интерфейсах; ранние REJECT/PASS и включённая блокировка QUIC имеют приоритет."
+
+msgid "Select a device…"
+msgstr "Выберите устройство…"
+
+msgid "Add device"
+msgstr "Добавить устройство"
+
+msgid "Remove"
+msgstr "Убрать"
+
+msgid "No devices selected."
+msgstr "Устройства не выбраны."
 
 msgid "Could not read DHCP reservations. Existing managed rules will be preserved; device selection is unavailable."
 msgstr "Не удалось прочитать DHCP-резервации. Существующие управляемые правила сохранятся, выбор устройств недоступен."

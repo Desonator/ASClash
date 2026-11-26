@@ -611,6 +611,9 @@ msgstr "服务已成功重载。"
 msgid "Service is restarting…"
 msgstr "服务正在重启…"
 
+msgid "Clash is starting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
+msgstr "Clash 正在启动。首先应用缓存或当前可用的列表；核心启动后，基于 provider 的列表可能会刷新。"
+
 msgid "Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
 msgstr "Clash 正在重启。首先应用缓存或当前可用的列表；核心启动后，基于 provider 的列表可能会再次刷新。"
 
@@ -1427,6 +1430,21 @@ msgstr "按设备 DIRECT 需要 Mihomo mode: rule；global/direct 模式不会�
 
 msgid "Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies."
 msgstr "所选设备将在开头的 REJECT 规则之后添加受 ASClash 管理的 SRC-IP-CIDR,DIRECT 规则。设备流量先经过 Mihomo，以保留 Fake-IP 域名映射，然后通过 DIRECT 出站。列表仅显示永久 IPv4 DHCP 保留租约。QUIC 阻止仍然生效。"
+
+msgid "Selected traffic still passes through Mihomo and uses DIRECT, preserving Fake-IP. Applies only on ASClash-processed interfaces; earlier REJECT/PASS rules and enabled QUIC blocking take priority."
+msgstr "所选设备的流量仍会经过 Mihomo 并使用 DIRECT，同时保留 Fake-IP 处理。仅适用于由 ASClash 处理的接口；靠前的 REJECT/PASS 规则和已启用的 QUIC 阻止优先。"
+
+msgid "Select a device…"
+msgstr "选择设备…"
+
+msgid "Add device"
+msgstr "添加设备"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "No devices selected."
+msgstr "未选择设备。"
 
 msgid "Could not read DHCP reservations. Existing managed rules will be preserved; device selection is unavailable."
 msgstr "无法读取 DHCP 保留租约。现有托管规则将保留，设备选择不可用。"

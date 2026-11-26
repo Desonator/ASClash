@@ -39,12 +39,27 @@ if (!(malwareIndex < cidrRejectIndex && cidrRejectIndex < trackerIndex && tracke
 	throw new Error('Managed DIRECT rule was not placed after rejects and before regular routing rules');
 
 const replaced = helpers.applyManagedDirectRules(first, ['192.168.1.111']);
-if (replaced.includes('192.168.1.110/32') || (replaced.match(/ASCLASH:DEVICE-DIRECT-BEGIN/g) || []).length !== 1)
-	throw new Error('Updating selected devices left an old or duplicate generated block');
+if (replaced.includes('192.168.1.110/32') || (replaced.match(/# ASCLASH:DEVICE-DIRECT/g) || []).length !== 1 || /ASCLASH:DEVICE-DIRECT-(?:BEGIN|END)/.test(replaced))
+	throw new Error('Updating selected devices left an old rule or unnecessary block comments');
 
 const removed = helpers.applyManagedDirectRules(replaced, []);
 if (removed.includes('ASCLASH:DEVICE-DIRECT'))
 	throw new Error('Clearing the selection did not remove the generated block');
+
+const legacyBlock = [
+	'mode: rule',
+	'rules:',
+	'  - RULE-SET,malware,REJECT',
+	'  # ASCLASH:DEVICE-DIRECT-BEGIN',
+	'  # Generated from permanent DHCP reservations; packets enter Mihomo and use its DIRECT rule.',
+	'  - SRC-IP-CIDR,192.168.1.110/32,DIRECT # ASCLASH:DEVICE-DIRECT',
+	'  # ASCLASH:DEVICE-DIRECT-END',
+	'  - MATCH,Proxy',
+	''
+].join('\n');
+const migrated = helpers.applyManagedDirectRules(legacyBlock, ['192.168.1.110']);
+if (/ASCLASH:DEVICE-DIRECT-(?:BEGIN|END)/.test(migrated) || migrated.includes('Generated from permanent DHCP reservations'))
+	throw new Error('Legacy generated comments were not cleaned during migration');
 
 const unsafeOrder = ['rules:', '  - DOMAIN-SUFFIX,example.org,Proxy', '  - RULE-SET,malware,REJECT', ''].join('\n');
 let rejectedUnsafeOrder = false;

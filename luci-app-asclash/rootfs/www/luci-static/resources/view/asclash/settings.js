@@ -584,6 +584,16 @@ function applyManagedDirectRules(config, selectedIPs) {
         throw new Error(_('The ASClash device-direct block markers are incomplete; repair the marked section in config.yaml before saving.'));
     if (begin !== -1) lines.splice(begin, end - begin + 1);
 
+    // Older builds surrounded generated rules with a comment block. Newer
+    // output uses the inline ownership tag on each rule, which is sufficient
+    // for safe replacement and keeps the user's rules file uncluttered.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('# ASCLASH:DEVICE-DIRECT')) continue;
+        const rule = lines[i].replace(/#.*/, '').trim();
+        if (/^-\s*SRC-IP-CIDR\s*,\s*[^,\s]+\s*,\s*DIRECT\s*$/i.test(rule))
+            lines.splice(i, 1);
+    }
+
     const ips = [...new Set((selectedIPs || []).map(normalizeDhcpIPv4).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (!ips.length) return lines.join('\n');
@@ -600,9 +610,9 @@ function applyManagedDirectRules(config, selectedIPs) {
         if (lines.some(line => /^rules\s*:/.test(line)))
             throw new Error(_('The rules section uses an unsupported YAML form; add a standalone rules: key before enabling device-direct rules.'));
         const prefix = lines.join('\n').replace(/\n*$/, '\n\n');
-        return prefix + ['rules:', beginMarker,
+        return prefix + ['rules:',
             ...ips.map(ip => `  - SRC-IP-CIDR,${ip}/32,DIRECT # ASCLASH:DEVICE-DIRECT`),
-            endMarker, ''].join('\n');
+            ''].join('\n');
     }
 
     let firstRule = -1;
@@ -628,13 +638,8 @@ function applyManagedDirectRules(config, selectedIPs) {
 
     const indent = firstRule === -1 ? '  ' : (lines[firstRule].match(/^\s*/) || ['  '])[0];
     const insertAt = leadingPolicyIndices.length ? leadingPolicyIndices[leadingPolicyIndices.length - 1] + 1 : (firstRule === -1 ? rulesIndex + 1 : firstRule);
-    const block = [
-        `${indent}# ASCLASH:DEVICE-DIRECT-BEGIN`,
-        `${indent}# Generated from permanent DHCP reservations; packets enter Mihomo and use its DIRECT rule.`,
-        ...ips.map(ip => `${indent}- SRC-IP-CIDR,${ip}/32,DIRECT # ASCLASH:DEVICE-DIRECT`),
-        `${indent}# ASCLASH:DEVICE-DIRECT-END`
-    ];
-    lines.splice(insertAt, 0, ...block);
+    const generatedRules = ips.map(ip => `${indent}- SRC-IP-CIDR,${ip}/32,DIRECT # ASCLASH:DEVICE-DIRECT`);
+    lines.splice(insertAt, 0, ...generatedRules);
     return lines.join('\n');
 }
 
@@ -645,7 +650,7 @@ function createDeviceDirectSection(dhcpDevices, existingIPs, dhcpAvailable) {
     });
     container.appendChild(E('h3', { 'style': 'margin:0 0 6px;' }, _('Direct routing for reserved DHCP devices')));
     container.appendChild(E('p', { 'class': 'cbi-section-descr', 'style': 'margin:0 0 10px;' },
-        _('Selected devices get a managed SRC-IP-CIDR,DIRECT rule after leading REJECT rules. Their traffic on ASClash-processed interfaces is sent through Mihomo first, preserving Fake-IP domain lookup, then uses the DIRECT outbound. Only permanent IPv4 DHCP reservations are listed. Block QUIC still applies.')));
+        _('Selected traffic still passes through Mihomo and uses DIRECT, preserving Fake-IP. Applies only on ASClash-processed interfaces; earlier REJECT/PASS rules and enabled QUIC blocking take priority.')));
 
     if (!dhcpAvailable) {
         container.appendChild(E('p', { 'style': 'color:#b42336;margin:0;' },
@@ -662,37 +667,84 @@ function createDeviceDirectSection(dhcpDevices, existingIPs, dhcpAvailable) {
             _('These generated rules have no matching permanent DHCP reservation and will be removed when settings are saved: %s').format(staleIPs.join(', '))));
     }
 
-    const selections = [];
+    const selectedDevices = new Map();
     if (!devices.length) {
         container.appendChild(E('p', { 'style': 'margin:0;' }, _('No permanent IPv4 DHCP reservations with MAC addresses were found.')));
     } else {
-        const grid = E('div', { 'style': 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:7px;' });
-        for (const device of devices) {
-            const id = 'managed-direct-' + device.ip.replace(/[^0-9]/g, '-');
-            const checkbox = E('input', { 'type': 'checkbox', 'id': id, 'value': device.ip });
-            checkbox.checked = existingIPs.includes(device.ip);
-            const macText = device.macs.length ? device.macs.join(', ') : _('reservation missing');
-            const label = E('label', {
-                'for': id,
-                'style': 'display:flex;align-items:center;gap:8px;padding:8px;border:1px solid ' + PANEL_BORDER_ITEM + ';border-radius:4px;cursor:pointer;background:' + PANEL_ITEM_BG + ';color:' + PANEL_TEXT + ';'
-            }, [
-                checkbox,
-                E('span', {}, [
-                    E('strong', {}, device.name || _('Unnamed device')),
-                    E('br'),
-                    E('small', {}, `${device.ip} · ${macText}`)
-                ])
-            ]);
-            grid.appendChild(label);
-            selections.push({ checkbox, device });
+        const deviceByIP = new Map(devices.map(device => [device.ip, device]));
+        for (const ip of existingIPs) {
+            const device = deviceByIP.get(ip);
+            if (device) selectedDevices.set(ip, device);
         }
-        container.appendChild(grid);
+
+        const deviceSelect = E('select', {
+            'class': 'cbi-input-select',
+            'style': 'min-width:260px;max-width:100%;'
+        });
+        const selectedList = E('div', {
+            'style': 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;'
+        });
+        const addButton = E('button', {
+            'class': 'btn',
+            'type': 'button',
+            'click': function() {
+                const device = deviceByIP.get(deviceSelect.value);
+                if (!device || selectedDevices.has(device.ip)) return;
+                selectedDevices.set(device.ip, device);
+                renderDeviceOptions();
+                renderSelectedDevices();
+            }
+        }, _('Add device'));
+
+        function renderDeviceOptions() {
+            const options = [E('option', { 'value': '' }, _('Select a device…'))];
+            for (const device of devices) {
+                if (selectedDevices.has(device.ip)) continue;
+                const label = device.name ? `${device.name} — ${device.ip}` : device.ip;
+                options.push(E('option', { 'value': device.ip }, label));
+            }
+            deviceSelect.replaceChildren(...options);
+            addButton.disabled = options.length === 1;
+        }
+
+        function renderSelectedDevices() {
+            const rows = [...selectedDevices.values()].map(device => {
+                const removeButton = E('button', {
+                    'class': 'btn',
+                    'type': 'button',
+                    'title': _('Remove'),
+                    'aria-label': _('Remove'),
+                    'style': 'padding:2px 7px;margin-left:8px;line-height:18px;',
+                    'click': function() {
+                        selectedDevices.delete(device.ip);
+                        renderDeviceOptions();
+                        renderSelectedDevices();
+                    }
+                }, '×');
+                return E('div', {
+                    'style': 'display:flex;align-items:center;padding:5px 8px;border:1px solid ' + PANEL_BORDER_ITEM + ';border-radius:4px;background:' + PANEL_ITEM_BG + ';color:' + PANEL_TEXT + ';'
+                }, [
+                    E('span', {}, [
+                        E('strong', {}, device.name || _('Unnamed device')),
+                        E('small', { 'style': 'margin-left:6px;' }, `${device.ip} · ${device.macs.join(', ')}`)
+                    ]),
+                    removeButton
+                ]);
+            });
+            if (!rows.length) rows.push(E('small', { 'style': 'color:' + PANEL_MUTED_TEXT + ';' }, _('No devices selected.')));
+            selectedList.replaceChildren(...rows);
+        }
+
+        renderDeviceOptions();
+        renderSelectedDevices();
+        container.appendChild(E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' }, [deviceSelect, addButton]));
+        container.appendChild(selectedList);
     }
 
     return {
         element: container,
         getSelectedDevices: function() {
-            return selections.filter(item => item.checkbox.checked).map(item => item.device);
+            return [...selectedDevices.values()];
         }
     };
 }
