@@ -200,6 +200,11 @@ setup_dns() {
 	dns_enabled=${dns_settings%%|*}
 	dns_listen=${dns_settings#*|}
 	if [ "$dns_enabled" != "enabled" ]; then
+		# Recover DNS settings left behind by an unclean shutdown before leaving
+		# dnsmasq untouched for this disabled-DNS configuration.
+		if [ -f "$DNS_BACKUP_FILE" ]; then
+			restore_dns || return 1
+		fi
 		msg "Mihomo DNS is disabled; leaving dnsmasq upstream settings unchanged"
 		return 0
 	fi
