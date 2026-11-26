@@ -13,6 +13,7 @@ const FILES = {
 	groupedAppliedDigest: '/tmp/clash/fakeip_port_groups.applied.digest',
 	listDiagnostics: '/tmp/clash/asclash-list-diagnostics.txt'
 };
+let diagnosticsRefreshHandler = null;
 
 async function read(path) {
 	return L.resolveDefault(fs.read(path), '');
@@ -468,7 +469,7 @@ return view.extend({
 		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, dnsRedirect, api, checkedAt: new Date().toLocaleString() };
 	},
 
-	render: function(data) {
+	render: function(data, skipAutoRefresh) {
 		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, dnsRedirect, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
@@ -623,11 +624,14 @@ return view.extend({
 		].filter(Boolean)));
 
 		const tproxyTestAvailable = proxyMode === 'tproxy' || proxyMode === 'mixed';
+		let tproxyProbeRunning = false;
 		const tproxyTestMessage = E('p', { 'class': 'cbi-section-descr', 'style': 'margin:6px 0 0;min-height:0;' }, '');
+		tproxyTestMessage.id = 'asclash-tproxy-test-result';
 		const tproxyTestButton = E('button', {
 			'class': 'btn',
 			'click': async function() {
 				tproxyTestButton.disabled = true;
+				tproxyProbeRunning = true;
 				try {
 					await runTproxyProbe(files[FILES.settings] || '', (message, state) => {
 						tproxyTestMessage.textContent = message;
@@ -637,6 +641,7 @@ return view.extend({
 					tproxyTestMessage.textContent = _('The TPROXY test could not complete; check API access and system diagnostics.');
 					tproxyTestMessage.style.color = '#b42336';
 				} finally {
+					tproxyProbeRunning = false;
 					tproxyTestButton.disabled = !tproxyTestAvailable;
 				}
 			}
@@ -663,12 +668,12 @@ return view.extend({
 			warningContent
 		]));
 
-		const refresh = E('button', { 'class': 'btn', 'click': () => window.location.reload() }, _('Refresh diagnostics'));
-		const root = E('div', { 'style': 'max-width:1100px;margin:0 auto;' }, [
+		const refresh = E('button', { 'class': 'btn', 'click': () => diagnosticsRefreshHandler && diagnosticsRefreshHandler() }, _('Refresh diagnostics'));
+		let root = E('div', { 'style': 'max-width:1100px;margin:0 auto;' }, [
 			E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;' }, [
 				E('h2', { 'style': 'margin:0;' }, _('Diagnostics')), refresh
 			]),
-			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode.')),
+			E('p', { 'class': 'cbi-section-descr' }, _('Read-only overview of parser output, Mihomo API and active network mode. Updates every 15 seconds while this tab is visible.')),
 			card(_('Overall status'), summary, 'padding-bottom:5px;'),
 			modeCard,
 			tproxyTestCard,
@@ -677,81 +682,43 @@ return view.extend({
 		]);
 
 		let polling = false;
-		let lastReport = String(files[FILES.listDiagnostics] || '');
-		let lastPhase = listDiagnostics.cycle.phase;
-		let lastRuntime = serviceRunning == null ? null : `${serviceRunning ? 1 : 0}:${kernelRunning ? 1 : 0}`;
-		let candidateRuntime = null;
-		let candidateSamples = 0;
-		const refreshTimer = setInterval(async () => {
+		let refreshTimer = null;
+		const refreshDiagnostics = async () => {
 			if (!root.isConnected) {
-				clearInterval(refreshTimer);
+				if (refreshTimer) clearInterval(refreshTimer);
+				if (diagnosticsRefreshHandler === refreshDiagnostics) diagnosticsRefreshHandler = null;
 				return;
 			}
-			if (document.hidden || polling) return;
+			if (document.hidden || polling || tproxyProbeRunning) return;
 			polling = true;
-			let reload = false;
 			try {
-				const [currentService, currentKernel, currentReport, currentDnsRedirect] = await Promise.all([
-					view_asclash_utils.getClashRunning().catch(() => null),
-					checkKernelRunning(),
-					read(FILES.listDiagnostics),
-					forceDnsEnabled ? command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'dns_redirect']) : Promise.resolve(null)
-				]);
-				if (forceDnsEnabled && currentDnsRedirect) {
-					const liveCounters = parseForcedDnsCounters(currentDnsRedirect.output);
-					const liveActive = currentDnsRedirect.ok && liveCounters.udp.rules > 0 && liveCounters.tcp.rules > 0;
-					const livePill = root.querySelector('#asclash-force-dns-status');
-					const liveCounterText = root.querySelector('#asclash-force-dns-counters');
-					if (livePill) {
-						livePill.textContent = currentService === false ? _('Service stopped') : liveActive ? _('Active') : _('Rules missing');
-						livePill.style.backgroundColor = currentService === false ? '#667085' : liveActive ? '#198754' : '#b42336';
-					}
-					if (liveCounterText) liveCounterText.textContent = formatForcedDnsCounters(liveCounters);
+				const [nextData] = await Promise.all([this.load()]);
+				if (!root.isConnected) return;
+				const expandedDetails = [...root.querySelectorAll('details')].map(item => item.open);
+				const previousProbeResult = root.querySelector('#asclash-tproxy-test-result');
+				const previousProbeText = previousProbeResult ? previousProbeResult.textContent : '';
+				const previousProbeColor = previousProbeResult ? previousProbeResult.style.color : '';
+				const scrollY = window.scrollY;
+				const replacement = this.render(nextData, true);
+				replacement.querySelectorAll('details').forEach((item, index) => { item.open = !!expandedDetails[index]; });
+				const nextProbeResult = replacement.querySelector('#asclash-tproxy-test-result');
+				if (nextProbeResult) {
+					nextProbeResult.textContent = previousProbeText;
+					nextProbeResult.style.color = previousProbeColor;
 				}
-				const reportText = String(currentReport || '');
-				if (reportText !== lastReport) {
-					const nextPhase = parseListDiagnostics(reportText).cycle.phase;
-					if (['complete', 'timeout', 'failed'].includes(nextPhase) || (nextPhase === 'waiting' && !['waiting', 'checking'].includes(lastPhase)))
-						reload = true;
-					lastReport = reportText;
-					lastPhase = nextPhase;
-				}
-
-				if (currentService != null) {
-					const runtime = `${currentService ? 1 : 0}:${currentKernel.ok ? 1 : 0}`;
-					if (lastRuntime == null) {
-						lastRuntime = runtime;
-					} else if (runtime === lastRuntime) {
-						candidateRuntime = null;
-						candidateSamples = 0;
-					} else {
-						if (candidateRuntime !== runtime) {
-							candidateRuntime = runtime;
-							candidateSamples = 1;
-						} else {
-							candidateSamples++;
-						}
-						if (candidateSamples >= 2) {
-							const [serviceWasRunning, kernelWasRunning] = lastRuntime.split(':').map(value => value === '1');
-							const serviceNowRunning = currentService;
-							const kernelNowRunning = currentKernel.ok;
-							lastRuntime = runtime;
-							candidateRuntime = null;
-							candidateSamples = 0;
-							const becameStopped = (serviceWasRunning && !serviceNowRunning) || (kernelWasRunning && !kernelNowRunning);
-							const reportPending = ['waiting', 'checking'].includes(lastPhase);
-							if (becameStopped || !reportPending) reload = true;
-						}
-					}
-				}
+				root.replaceWith(replacement);
+				root = replacement;
+				diagnosticsRefreshHandler = refreshDiagnostics;
+				window.scrollTo(0, scrollY);
+			} catch (_e) {
+				// Keep the last successful snapshot visible; the next poll will retry.
 			} finally {
 				polling = false;
 			}
-			if (reload && root.isConnected) {
-				clearInterval(refreshTimer);
-				window.location.reload();
-			}
-		}, 5000);
+		};
+		diagnosticsRefreshHandler = refreshDiagnostics;
+		if (!skipAutoRefresh)
+			refreshTimer = setInterval(refreshDiagnostics, 15000);
 
 		return root;
 	},

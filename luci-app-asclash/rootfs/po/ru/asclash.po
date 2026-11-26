@@ -31,8 +31,8 @@ msgstr "Диагностика"
 msgid "Read-only overview of parser output and active network state."
 msgstr "Сводка результатов парсеров и текущего состояния сети. Только чтение."
 
-msgid "Read-only overview of parser output, Mihomo API and active network mode."
-msgstr "Сводка парсеров, API Mihomo и согласованности сетевого режима. Только чтение."
+msgid "Read-only overview of parser output, Mihomo API and active network mode. Updates every 15 seconds while this tab is visible."
+msgstr "Сводка парсеров, API Mihomo и согласованности сетевого режима. Только чтение; обновляется каждые 15 секунд, пока вкладка открыта и видна."
 
 msgid "Refresh diagnostics"
 msgstr "Обновить диагностику"

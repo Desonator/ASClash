@@ -29,8 +29,8 @@ msgstr "诊断"
 msgid "Read-only overview of parser output and active network state."
 msgstr "解析器输出和当前网络状态的只读概览。"
 
-msgid "Read-only overview of parser output, Mihomo API and active network mode."
-msgstr "解析器、Mihomo API 和网络模式一致性的只读概览。"
+msgid "Read-only overview of parser output, Mihomo API and active network mode. Updates every 15 seconds while this tab is visible."
+msgstr "解析器、Mihomo API 和网络模式一致性的只读概览。标签页可见时每 15 秒自动更新。"
 
 msgid "Refresh diagnostics"
 msgstr "刷新诊断"
