@@ -2745,9 +2745,10 @@ apply_nft_src_ip_cidr_policy() {
     [ "$MODE" = "explicit" ] || return 0
     is_ipcidr_whitelist_mode || return 0
 
-    local reject_src_cidrs direct_src_cidrs
+    local reject_src_cidrs direct_src_cidrs managed_direct_src_cidrs
     reject_src_cidrs=$(extract_reject_src_ip_cidrs)
     direct_src_cidrs=$(extract_direct_src_ip_cidrs)
+    managed_direct_src_cidrs=$(extract_managed_direct_src_ip_cidrs)
 
     if [ -n "$reject_src_cidrs" ]; then
         echo "$reject_src_cidrs" | while IFS= read -r src; do
@@ -2761,6 +2762,12 @@ apply_nft_src_ip_cidr_policy() {
             [ -n "$src" ] && nft add rule inet clash CLASH_MARK ip saddr "$src" return
         done
         msg "SRC-IP-CIDR direct policy applied for: $(echo "$direct_src_cidrs" | tr '\n' ' ')"
+    fi
+
+    # The managed LuCI opt-in means "pass through Mihomo, then DIRECT". Do not
+    # let the legacy explicit-mode firewall return shadow that rule.
+    if [ -n "$managed_direct_src_cidrs" ]; then
+        msg "Managed DHCP DIRECT sources excluded from legacy firewall bypass: $(echo "$managed_direct_src_cidrs" | tr '\n' ' ')"
     fi
 }
 
@@ -2832,7 +2839,7 @@ apply_nft_src_ip_cidr_managed_direct_marking() {
         nft add rule inet clash CLASH_MARK ip saddr "$src" meta l4proto udp counter meta mark set "$udp_mark"
     done
 
-    msg "Managed DHCP DIRECT clients routed through Mihomo: $(echo "$src_cidrs" | tr '\n' ' ') (UDP mark: $udp_mark)"
+    msg "Managed DHCP DIRECT clients routed through Mihomo on processed interfaces: $(echo "$src_cidrs" | tr '\n' ' ') (UDP mark: $udp_mark)"
 }
 
 # For nftables - apply TPROXY rules in proxy chain (mode-aware)

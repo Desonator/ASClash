@@ -34,15 +34,17 @@ RESERVED_NETWORKS=192.168.0.0/16
 printf 'firewall-direct=%s\n' "$(extract_direct_src_ip_cidrs | tr '\n' ',')"
 printf 'managed-direct=%s\n' "$(extract_managed_direct_src_ip_cidrs | tr '\n' ',')"
 printf 'reject=%s\n' "$(extract_reject_src_ip_cidrs | tr '\n' ',')"
-for PROXY_MODE in tproxy tun mixed; do
-  : > "$NFT_CAPTURE"
-  apply_nft_src_ip_cidr_managed_direct_marking 203.0.113.5
-  grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto tcp counter meta mark set 0x0001' "$NFT_CAPTURE"
-  if [ "$PROXY_MODE" = mixed ]; then
-    grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto udp counter meta mark set 0x0003' "$NFT_CAPTURE"
-  else
-    grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto udp counter meta mark set 0x0001' "$NFT_CAPTURE"
-  fi
+for MODE in explicit exclude; do
+  for PROXY_MODE in tproxy tun mixed; do
+    : > "$NFT_CAPTURE"
+    apply_nft_src_ip_cidr_managed_direct_marking 203.0.113.5
+    grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto tcp counter meta mark set 0x0001' "$NFT_CAPTURE"
+    if [ "$PROXY_MODE" = mixed ]; then
+      grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto udp counter meta mark set 0x0003' "$NFT_CAPTURE"
+    else
+      grep -F -q 'ip saddr 192.168.1.110/32 meta l4proto udp counter meta mark set 0x0001' "$NFT_CAPTURE"
+    fi
+  done
 done
 EOF
 } > "$TEST_DIR/test.sh"
@@ -50,6 +52,7 @@ EOF
 cat > "$TEST_DIR/config.yaml" <<'EOF'
 rules:
   - SRC-IP-CIDR,192.168.1.10/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.110/32,DIRECT
   - SRC-IP-CIDR,192.168.1.110/32,DIRECT # ASCLASH:DEVICE-DIRECT
   - SRC-IP-CIDR,192.168.1.20/32,REJECT
   - MATCH,PROXY

@@ -8,7 +8,15 @@ const start = source.indexOf('function normalizeDhcpIPv4(');
 const end = source.indexOf('\nasync function loadInterfacesByMode', start);
 if (start < 0 || end < 0) throw new Error('Could not locate device-direct helpers');
 
-const helpers = new Function('_', `${source.slice(start, end)}\nreturn { applyManagedDirectRules };`)(value => value);
+const mockUci = {
+	load: async () => {},
+	sections: () => [
+		{ ip: '192.168.1.110', mac: 'AA:BB:CC:DD:EE:FF', name: 'phone' },
+		{ ip: '192.168.1.111', mac: 'AA:BB:CC:DD:EE:00', name: 'disabled', ignore: '1' },
+		{ ip: '999.1.1.1', mac: 'AA:BB:CC:DD:EE:01', name: 'invalid' }
+	]
+};
+const helpers = new Function('_', 'uci', `${source.slice(start, end)}\nreturn { applyManagedDirectRules, getPermanentDhcpDevices };`)(value => value, mockUci);
 const config = [
 	'mode: rule',
 	'rules:',
@@ -45,4 +53,9 @@ catch (e) { rejectedUnsafeOrder = /Move all REJECT/.test(e.message); }
 if (!rejectedUnsafeOrder)
 	throw new Error('A later REJECT rule was not protected from being shadowed');
 
-console.log('Managed DIRECT rule editing tests passed.');
+(async () => {
+	const devices = await helpers.getPermanentDhcpDevices();
+	if (devices.length !== 1 || devices[0].ip !== '192.168.1.110')
+		throw new Error('DHCP host parsing included an ignored or invalid reservation');
+	console.log('Managed DIRECT rule editing and DHCP reservation tests passed.');
+})().catch(e => { console.error(e); process.exitCode = 1; });

@@ -524,6 +524,7 @@ async function getPermanentDhcpDevices() {
     await uci.load('dhcp');
     const byIp = new Map();
     for (const host of uci.sections('dhcp', 'host') || []) {
+        if (host.ignore === '1' || host.ignore === 'true') continue;
         const ip = normalizeDhcpIPv4(host.ip);
         const macs = (Array.isArray(host.mac) ? host.mac : [host.mac])
             .map(mac => String(mac || '').trim().toLowerCase())
@@ -752,6 +753,8 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
         const previousSettings = await L.resolveDefault(fs.read('/opt/clash/settings'), '');
         let configStage = null;
         const configContent = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+        if (Array.isArray(managedDirectIPs) && managedDirectIPs.length && !configContent)
+            throw new Error(_('Cannot add device-direct rules because config.yaml is empty.'));
         if (configContent) {
             let updatedConfig = transformProxyMode(configContent, proxyMode, tunStack);
 
@@ -768,10 +771,7 @@ MIHOMO_RELEASE_REPO=${mihomoReleaseRepo || 'MetaCubeX/mihomo'}
             }
 
             if (Array.isArray(managedDirectIPs)) {
-                if (!configContent && managedDirectIPs.length)
-                    throw new Error(_('Cannot add device-direct rules because config.yaml is empty.'));
-                if (configContent)
-                    updatedConfig = applyManagedDirectRules(updatedConfig, managedDirectIPs);
+                updatedConfig = applyManagedDirectRules(updatedConfig, managedDirectIPs);
             }
 
             configStage = await view_asclash_utils.stageValidatedConfig(updatedConfig);

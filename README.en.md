@@ -184,7 +184,7 @@ Supported rules and skip reasons are shown on the Status and Diagnostics pages.
 ### Limitations and safe configuration
 
 - IPv4 only; IPv6 firewall and routing rules are not generated.
-- Per-device bypass based on permanent DHCP leases is not currently implemented.
+- Selected permanent IPv4 DHCP reservations can use a LuCI-managed `SRC-IP-CIDR,...,DIRECT` rule: traffic first reaches Mihomo (preserving Fake-IP mapping), then uses DIRECT. It applies only on processed interfaces; QUIC blocking and earlier REJECT/PASS rules retain priority.
 - Automatic fail-open routing when all servers in a Smart group fail is not implemented.
 - The AND parser handles a documented subset of rule syntax; operands must match that subset.
 - Early firewall rules and IP lists can determine whether a connection reaches the core. Mihomo configuration controls the final route and domain-rule ordering.
