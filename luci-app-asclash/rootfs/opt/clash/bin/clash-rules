@@ -820,45 +820,71 @@ chain_exists() {
 # Function to extract fake-ip configuration from config.yaml
 extract_fake_ip_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
+        warn "Fake-IP config: config file not found at $CONFIG_FILE"
         return 1
     fi
 
-    # Use awk to parse DNS section and extract both fake-ip-range and fake-ip-filter-mode
-    awk '
-    /^dns:/ { in_dns = 1; next }
-    /^[a-zA-Z]/ && !/^ / { in_dns = 0 }
-    in_dns && /enable:/ {
-        gsub(/^[[:space:]]*enable:[[:space:]]*/, "")
-        gsub(/[[:space:]]*$/, "")
-        sub(/#.*/, "")
-        if ($0 == "true") enable = "true"
+    # Parse exact DNS keys and normalize YAML scalar quoting before using values
+    # in firewall commands. This intentionally handles only simple scalars.
+    local parsed parse_status range filter_mode
+    parsed=$(awk '
+    function scalar(s, first, last) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+        if (length(s) >= 2) {
+            first = substr(s, 1, 1)
+            last = substr(s, length(s), 1)
+            if ((first == "\047" || first == "\"") && first == last)
+                s = substr(s, 2, length(s) - 2)
+        }
+        return s
     }
-    in_dns && /enhanced-mode:/ {
-        gsub(/^[[:space:]]*enhanced-mode:[[:space:]]*/, "")
-        gsub(/[[:space:]]*$/, "")
-        sub(/#.*/, "")
-        if ($0 == "fake-ip") mode = "fake-ip"
+    function value(line, key) {
+        sub("^[[:space:]]*" key "[[:space:]]*:[[:space:]]*", "", line)
+        sub(/[[:space:]]+#.*/, "", line)
+        return scalar(line)
     }
-    in_dns && /fake-ip-range:/ {
-        gsub(/^[[:space:]]*fake-ip-range:[[:space:]]*/, "")
-        gsub(/[[:space:]]*$/, "")
-        sub(/#.*/, "")
-        range = $0
-    }
-    in_dns && /fake-ip-filter-mode:/ {
-        gsub(/^[[:space:]]*fake-ip-filter-mode:[[:space:]]*/, "")
-        gsub(/[[:space:]]*$/, "")
-        sub(/#.*/, "")
-        filter_mode = tolower($0)
+    /^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; next }
+    /^[^[:space:]#][^:]*:[[:space:]]*/ { if ($1 != "dns:") in_dns = 0 }
+    in_dns {
+        if ($0 ~ /^[[:space:]]*enable[[:space:]]*:/) enable = tolower(value($0, "enable"))
+        else if ($0 ~ /^[[:space:]]*enhanced-mode[[:space:]]*:/) mode = tolower(value($0, "enhanced-mode"))
+        else if ($0 ~ /^[[:space:]]*fake-ip-range[[:space:]]*:/) range = value($0, "fake-ip-range")
+        else if ($0 ~ /^[[:space:]]*fake-ip-filter-mode[[:space:]]*:/) filter_mode = tolower(value($0, "fake-ip-filter-mode"))
     }
     END {
+        if (enable != "" && enable != "true" && enable != "false") {
+            print "Invalid dns.enable value: " enable
+            exit 1
+        }
+        if (mode != "" && mode != "fake-ip" && mode != "redir-host") {
+            print "Invalid dns.enhanced-mode value: " mode
+            exit 1
+        }
+        if (filter_mode != "" && filter_mode != "blacklist" && filter_mode != "whitelist" && filter_mode != "rule") {
+            print "Invalid dns.fake-ip-filter-mode value: " filter_mode
+            exit 1
+        }
         if (enable == "true" && mode == "fake-ip") {
             if (range == "") range = "198.18.0.0/15"
-            # Use blacklist as default if filter_mode is not specified
-            print range "|" (filter_mode ? filter_mode : "blacklist")
+            if (filter_mode == "") filter_mode = "blacklist"
+            print range "|" filter_mode
         }
     }
-    ' "$CONFIG_FILE"
+    ' "$CONFIG_FILE")
+    parse_status=$?
+    if [ "$parse_status" -ne 0 ]; then
+        warn "Fake-IP config parsing failed: $parsed"
+        return 1
+    fi
+    [ -n "$parsed" ] || return 0
+
+    range=${parsed%|*}
+    filter_mode=${parsed#*|}
+    if ! is_valid_ipv4_cidr "$range"; then
+        warn "Invalid dns.fake-ip-range IPv4 address/range: '$range'"
+        return 1
+    fi
+    printf '%s|%s\n' "$range" "$filter_mode"
 }
 
 # =============================================================================
@@ -3828,7 +3854,13 @@ update_fakeip_whitelist_sets() {
     load_all_settings_once
 
     local fake_ip_config fake_ip_range fake_ip_filter_mode
-    fake_ip_config=$(extract_fake_ip_config)
+    fake_ip_config=$(extract_fake_ip_config) || {
+        ASCLASH_FAKEIP_STATE="failed"
+        ASCLASH_GROUPED_STATE="failed"
+        set_list_progress "failed"
+        warn "Refusing to refresh rule sets because Fake-IP settings could not be parsed"
+        return 1
+    }
     if [ -n "$fake_ip_config" ]; then
         fake_ip_range="${fake_ip_config%|*}"
         fake_ip_filter_mode="${fake_ip_config#*|}"
@@ -4149,7 +4181,11 @@ start() {
 
     local server_ips fake_ip_config fake_ip_range fake_ip_filter_mode
     server_ips=$(extract_server_ips)
-    fake_ip_config=$(extract_fake_ip_config)
+    fake_ip_config=$(extract_fake_ip_config) || {
+        warn "Refusing to apply firewall rules because Fake-IP settings could not be parsed"
+        set_list_progress "failed"
+        return 1
+    }
 
     # Parse the combined result
     if [ -n "$fake_ip_config" ]; then
