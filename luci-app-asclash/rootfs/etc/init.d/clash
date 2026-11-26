@@ -200,8 +200,8 @@ setup_dns() {
 	dns_enabled=${dns_settings%%|*}
 	dns_listen=${dns_settings#*|}
 	if [ "$dns_enabled" != "enabled" ]; then
-		msg "ERROR: DNS is disabled in config.yaml, but dnsmasq forwarding is required by the current service setup"
-		return 1
+		msg "Mihomo DNS is disabled; leaving dnsmasq upstream settings unchanged"
+		return 0
 	fi
 	case "$dns_listen" in
 		*:* ) dns_host=${dns_listen%:*}; dns_port=${dns_listen##*:} ;;
