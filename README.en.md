@@ -19,7 +19,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Fake-IP IP-CIDR | Builds an IPv4 list from referenced rule providers and supported inline rules. LuCI shows per-provider counts and an FAQ; manual entries outside the generated block are preserved. |
 | Forced DNS | Redirects client IPv4 TCP/UDP requests to router port 53 and reports active rules and conntrack-flow counters in Diagnostics. It follows interface-processing scope and exempts DIRECT sources. |
 | Grouped AND rules | Supported `AND` rules are translated into IPv4 nftables sets and compact protocol/port rules. Matching sources/sets can be reused while TCP/UDP and port conditions stay separate. |
-| Per-device DIRECT | Settings can select a device with a permanent IPv4 DHCP reservation. ASClash adds a marked `SRC-IP-CIDR,...,DIRECT` rule to Mihomo and sends that device's traffic through the core so Fake-IP domain mapping is preserved before DIRECT. It applies only on processed interfaces; QUIC blocking still takes precedence. |
+| Per-device DIRECT | Selecting a permanent IPv4 DHCP reservation adds a LuCI-managed Mihomo rule: the selected device's traffic goes through the core and exits directly. |
 | Smart groups | An optional Status-page widget displays servers and weights for `type: smart` groups when the selected core exposes the required API. |
 | Kernel source | The installer offers official Mihomo or Prizrak-Core. The selection is saved in settings; router architecture is detected automatically. |
 | Service operation | Status notifications report service restarts and rule-list generation/application; the configuration page includes service controls and a dashboard link. |
@@ -123,6 +123,10 @@ ASClash detects the router architecture, compares installed and available versio
 
 ASClash installs firewall and policy-routing rules for selected interfaces. Reserved/local networks, proxy-server addresses, service ports and already-marked traffic are excluded to reduce routing loops. The firewall decides which connections reach Mihomo; Mihomo's configuration and rule order decide the final route/action for those connections.
 
+### DIRECT for a selected device
+
+Select a device with a permanent IPv4 DHCP reservation in Settings. ASClash adds a marked `SRC-IP-CIDR,<IP>/32,DIRECT` rule near the start of Mihomo's rules, after leading `REJECT`/`PASS` rules. Traffic still passes through Mihomo, which chooses the DIRECT outbound; this preserves Fake-IP handling. It works with TPROXY, TUN and MIXED, including `redir-host`, when the ingress interface is in ASClash's scope: selected interfaces in Explicit mode, all but excluded interfaces in Exclude mode. Mihomo must use `mode: rule`; earlier `REJECT`/`PASS` rules and enabled QUIC blocking retain priority.
+
 ### Fake-IP and real IP addresses
 
 With `fake-ip-filter-mode: whitelist`, Mihomo returns Fake-IP addresses only for DNS names selected by its whitelist logic. With `rule`, it checks `fake-ip-filter` from top to bottom and chooses `fake-ip` or `real-ip` for each match. Fake-IP traffic is identified by the configured range.
@@ -184,7 +188,7 @@ Supported rules and skip reasons are shown on the Status and Diagnostics pages.
 ### Limitations and safe configuration
 
 - IPv4 only; IPv6 firewall and routing rules are not generated.
-- Selected permanent IPv4 DHCP reservations can use a LuCI-managed `SRC-IP-CIDR,...,DIRECT` rule: traffic first reaches Mihomo (preserving Fake-IP mapping), then uses DIRECT. It applies only on processed interfaces; QUIC blocking and earlier REJECT/PASS rules retain priority.
+- Per-device DIRECT requires Mihomo `mode: rule` and applies only on interfaces processed by ASClash.
 - Automatic fail-open routing when all servers in a Smart group fail is not implemented.
 - The AND parser handles a documented subset of rule syntax; operands must match that subset.
 - Early firewall rules and IP lists can determine whether a connection reaches the core. Mihomo configuration controls the final route and domain-rule ordering.
