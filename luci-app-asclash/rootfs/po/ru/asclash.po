@@ -653,11 +653,11 @@ msgstr "Служба успешно перезагружена."
 msgid "Service is restarting…"
 msgstr "Служба перезапускается…"
 
-msgid "Clash is starting; firewall lists will be rebuilt and applied."
-msgstr "Запускается Clash; списки файрвола будут пересобраны и применены."
+msgid "Clash is starting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts."
+msgstr "Clash запускается. Сначала применяются кэшированные или уже доступные списки; после запуска ядра списки на основе провайдеров могут быть обновлены."
 
-msgid "Clash is restarting; firewall lists will be rebuilt and applied."
-msgstr "Clash перезапускается; списки файрвола будут пересобраны и применены."
+msgid "Post-start provider refresh completed: firewall lists were updated after the core started. The earlier cached-list application was part of the same startup."
+msgstr "После запуска ядра списки на основе провайдеров обновлены, правила файрвола применены. Первичное применение кэшированных списков было частью того же запуска."
 
 msgid "Building applicable Fake-IP and grouped firewall lists…"
 msgstr "Формируются подходящие списки Fake-IP и сгруппированных правил файрвола…"

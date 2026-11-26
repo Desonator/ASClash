@@ -4501,7 +4501,7 @@ finalize_grouped_list_diagnostics() {
 run_update_cycle() {
     local trigger="$1" readiness="$2" old_grouped_digest new_grouped_digest update_rc
     acquire_update_lock || return 0
-    ASCLASH_PROGRESS_ID="update-$$"
+    ASCLASH_PROGRESS_ID="${trigger}-$$"
     ASCLASH_LIST_CYCLE_ACTIVE="true"
     begin_list_diagnostics "checking" "update-$$" "$trigger"
     set_list_progress "building"

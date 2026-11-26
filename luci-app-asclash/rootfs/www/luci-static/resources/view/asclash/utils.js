@@ -271,12 +271,16 @@ async function watchListProgress(previous, onProgress, timeoutMs) {
 
 function notifyListProgress(progress) {
     if (!progress) return;
-    const message = {
-        building: _('Building applicable Fake-IP and grouped firewall lists…'),
-        applying: _('Lists are built; applying them to the firewall…'),
-        applied: _('Generated lists and firewall rules were applied successfully.'),
-        failed: _('List generation or firewall application failed. Check Diagnostics and the system log.')
-    }[progress.phase];
+    if (progress.phase === 'building' || progress.phase === 'applying') return;
+
+    if (progress.phase === 'applied' && String(progress.operation || '').startsWith('start-'))
+        return;
+
+    const message = progress.phase === 'failed'
+        ? _('List generation or firewall application failed. Check Diagnostics and the system log.')
+        : progress.phase === 'applied' && String(progress.operation || '').startsWith('post-start-')
+            ? _('Post-start provider refresh completed: firewall lists were updated after the core started. The earlier cached-list application was part of the same startup.')
+            : progress.phase === 'applied' ? _('Generated lists and firewall rules were applied successfully.') : null;
     if (message)
         ui.addNotification(null, E('p', message), progress.phase === 'failed' ? 'error' : progress.phase === 'applied' ? 'success' : 'info');
 }

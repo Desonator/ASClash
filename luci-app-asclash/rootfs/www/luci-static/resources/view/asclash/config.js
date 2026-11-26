@@ -45,7 +45,7 @@ async function toggleService() {
             await dispatchServiceActions(['stop', 'disable']);
         } else {
             await dispatchServiceActions(['start', 'enable']);
-            ui.addNotification(null, E('p', _('Clash is starting; firewall lists will be rebuilt and applied.')), 'info');
+            ui.addNotification(null, E('p', _('Clash is starting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts.')), 'info');
             watchListProgress(progressBefore);
         }
 
@@ -73,7 +73,7 @@ async function restartService() {
         const wasRunning = await getServiceStatus();
         const progressBefore = await view_asclash_utils.getListProgress();
         await view_asclash_utils.execDetached('/etc/init.d/clash restart');
-        ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+        ui.addNotification(null, E('p', _('Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts.')), 'info');
         watchListProgress(progressBefore);
 
         if (wasRunning && !await view_asclash_utils.waitForServiceStatus(getServiceStatus, false, 15000)) {
@@ -232,7 +232,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.27';
+const ASCLASH_VERSION = '4.8.2.28';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -336,7 +336,7 @@ return view.extend({
                     await view_asclash_utils.execDetached('/etc/init.d/clash reload');
                 } catch (e) {}
 
-                ui.addNotification(null, E('p', _('Clash is restarting; firewall lists will be rebuilt and applied.')), 'info');
+                ui.addNotification(null, E('p', _('Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts.')), 'info');
                 watchListProgress(progressBefore);
 
                 const [serviceRunning, progress] = await Promise.all([
