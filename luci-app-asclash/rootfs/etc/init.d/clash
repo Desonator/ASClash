@@ -168,11 +168,84 @@ setup_clash_directories() {
 
 # Function to configure DNS
 setup_dns() {
-	local dns_server="127.0.0.1#7874"
+	local dns_settings dns_enabled dns_listen dns_host dns_port dns_target dns_server dns_server_owned
+	dns_settings=$(awk '
+	function trim(s) {
+		gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+		if (length(s) >= 2) {
+			first = substr(s, 1, 1)
+			last = substr(s, length(s), 1)
+			if ((first == "\047" || first == "\"") && first == last)
+				s = substr(s, 2, length(s) - 2)
+		}
+		return s
+	}
+	/^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; next }
+	/^[^[:space:]#][^:]*:[[:space:]]*/ { if ($1 != "dns:") in_dns = 0 }
+	in_dns {
+		line = $0
+		sub(/[[:space:]]+#.*/, "", line)
+		if (line ~ /^[[:space:]]*enable:[[:space:]]*/) {
+			sub(/^[[:space:]]*enable:[[:space:]]*/, "", line); enable = trim(line)
+		}
+		if (line ~ /^[[:space:]]*listen:[[:space:]]*/) {
+			sub(/^[[:space:]]*listen:[[:space:]]*/, "", line); listen = trim(line)
+		}
+	}
+	END { if (enable == "true") print "enabled|" listen; else print "disabled|" listen }
+	' "$CLASH_DIR/config.yaml") || {
+		msg "ERROR: Failed to read DNS settings from config.yaml"
+		return 1
+	}
+	dns_enabled=${dns_settings%%|*}
+	dns_listen=${dns_settings#*|}
+	if [ "$dns_enabled" != "enabled" ]; then
+		msg "ERROR: DNS is disabled in config.yaml, but dnsmasq forwarding is required by the current service setup"
+		return 1
+	fi
+	case "$dns_listen" in
+		*:* ) dns_host=${dns_listen%:*}; dns_port=${dns_listen##*:} ;;
+		*)
+			msg "ERROR: Unsupported or missing IPv4 DNS listen address: '${dns_listen:-<empty>}'"
+			return 1
+			;;
+	esac
+	case "$dns_port" in
+		''|*[!0-9]*)
+			msg "ERROR: Invalid DNS listen port in config.yaml: '$dns_port'"
+			return 1
+			;;
+	esac
+	if ! printf '%s\n' "$dns_port" | awk '{ if ($1 + 0 < 1 || $1 + 0 > 65535) exit 1 }'; then
+		msg "ERROR: DNS listen port is out of range: '$dns_port'"
+		return 1
+	fi
+	case "$dns_host" in
+		0.0.0.0|\*|localhost) dns_target="127.0.0.1#$dns_port" ;;
+		*[!0-9.]*)
+			msg "ERROR: Unsupported IPv4 DNS listen host: '$dns_host'"
+			return 1
+			;;
+		*) dns_target="$dns_host#$dns_port" ;;
+	esac
+	case "$dns_host" in
+		0.0.0.0|\*|localhost) ;;
+		*)
+			if ! printf '%s\n' "$dns_host" | awk -F. 'NF != 4 { exit 1 } { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1 }'; then
+				msg "ERROR: Invalid IPv4 DNS listen address: '$dns_host'"
+				return 1
+			fi
+			;;
+	esac
+	dns_server="$dns_target"
 
 	# Check if the server is already added
 	local existing_server
-	existing_server=$(uci get dhcp.@dnsmasq[0].server 2>/dev/null | grep "$dns_server")
+	existing_server=$(uci get dhcp.@dnsmasq[0].server 2>/dev/null | grep -F -x "$dns_server")
+	dns_server_owned=1
+	if [ -n "$existing_server" ] && [ "$dns_server" != "127.0.0.1#7874" ]; then
+		dns_server_owned=0
+	fi
 
 	# Save original cachesize and noresolv values so restore_dns can put them back
 	# exactly as they were, rather than simply deleting them (which would lose any
@@ -180,14 +253,24 @@ setup_dns() {
 	if [ ! -f "$DNS_BACKUP_FILE" ]; then
 		mkdir -p "$(dirname "$DNS_BACKUP_FILE")" 2>/dev/null
 		if [ -n "$existing_server" ]; then
-			printf 'CACHESIZE=\nNORESOLV=\n' > "$DNS_BACKUP_FILE"
-			msg "Detected stale DNS state from prior unclean shutdown; using safe defaults for restore"
+			if [ "$dns_server" = "127.0.0.1#7874" ]; then
+				printf 'CACHESIZE=\nNORESOLV=\nDNS_SERVER=%s\nDNS_SERVER_OWNED=1\n' "$dns_server" > "$DNS_BACKUP_FILE"
+				msg "Detected legacy DNS state from prior unclean shutdown; using safe defaults for restore"
+			else
+				local orig_cachesize orig_noresolv
+				orig_cachesize=$(uci get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
+				orig_noresolv=$(uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null)
+				printf 'CACHESIZE=%s\nNORESOLV=%s\nDNS_SERVER=%s\nDNS_SERVER_OWNED=0\n' "$orig_cachesize" "$orig_noresolv" "$dns_server" > "$DNS_BACKUP_FILE"
+			fi
 		else
 			local orig_cachesize orig_noresolv
 			orig_cachesize=$(uci get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
 			orig_noresolv=$(uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null)
-			printf 'CACHESIZE=%s\nNORESOLV=%s\n' "$orig_cachesize" "$orig_noresolv" > "$DNS_BACKUP_FILE"
+			printf 'CACHESIZE=%s\nNORESOLV=%s\nDNS_SERVER=%s\nDNS_SERVER_OWNED=1\n' "$orig_cachesize" "$orig_noresolv" "$dns_server" > "$DNS_BACKUP_FILE"
 		fi
+	fi
+	if ! grep -q '^DNS_SERVER=' "$DNS_BACKUP_FILE"; then
+		printf 'DNS_SERVER=%s\nDNS_SERVER_OWNED=%s\n' "$dns_server" "$dns_server_owned" >> "$DNS_BACKUP_FILE"
 	fi
 
 	if [ -z "$existing_server" ]; then
@@ -212,19 +295,39 @@ setup_dns() {
 		return 1
 	fi
 
-	msg "DNS settings configured"
+	msg "DNS settings configured: dnsmasq -> $dns_server (Mihomo listen: $dns_listen)"
 	return 0
 }
 
 # Function to restore DNS settings
 restore_dns() {
-	local dns_server="127.0.0.1#7874"
+	local dns_server=""
+	local dns_server_owned="1"
+	local legacy_dns_server_owned="0"
+	if [ -f "$DNS_BACKUP_FILE" ]; then
+		dns_server=$(sed -n 's/^DNS_SERVER=//p' "$DNS_BACKUP_FILE" | head -n 1)
+		local saved_dns_server_owned
+		saved_dns_server_owned=$(sed -n 's/^DNS_SERVER_OWNED=//p' "$DNS_BACKUP_FILE" | head -n 1)
+		[ -z "$saved_dns_server_owned" ] || dns_server_owned="$saved_dns_server_owned"
+		if [ -z "$dns_server" ]; then
+			legacy_dns_server_owned="1"
+			dns_server_owned="0"
+		fi
+	fi
+	# Older backups predate DNS_SERVER tracking; retain compatibility with the
+	# former fixed endpoint.
+	local legacy_dns_server="127.0.0.1#7874"
 
 	# Get the list of servers and remove only ours
 	local servers
 	servers=$(uci get dhcp.@dnsmasq[0].server 2>/dev/null)
-	if echo "$servers" | grep -q "$dns_server"; then
-		uci del_list dhcp.@dnsmasq[0].server="$dns_server" 2>/dev/null
+	if [ "$dns_server_owned" = "1" ]; then
+		if [ -n "$dns_server" ] && printf '%s\n' "$servers" | grep -F -x -q "$dns_server"; then
+			uci del_list dhcp.@dnsmasq[0].server="$dns_server" 2>/dev/null
+		fi
+	fi
+	if [ "$legacy_dns_server_owned" = "1" ] && printf '%s\n' "$servers" | grep -F -x -q "$legacy_dns_server"; then
+		uci del_list dhcp.@dnsmasq[0].server="$legacy_dns_server" 2>/dev/null
 	fi
 
 	# Restore the exact original values we saved before modifying them.
