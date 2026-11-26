@@ -1950,11 +1950,9 @@ extract_classical_and_ipcidr_entries() {
         if (line !~ /AND,/) next
         body=substr(line, index(line, "AND,")+4)
         residual=body
-        network_count=gsub(/NETWORK,/, "", residual)
-        port_count=gsub(/DST-PORT,/, "", residual)
+        network_count=gsub(/NETWORK,[A-Za-z0-9_-]+/, "", residual)
+        port_count=gsub(/DST-PORT,[0-9,-]+/, "", residual)
         gsub(/IP-CIDR,[^,()[:space:]]+/, "", residual)
-        gsub(/NETWORK,[A-Za-z0-9_-]+/, "", residual)
-        gsub(/DST-PORT,[0-9,-]+/, "", residual)
         gsub(/[(),[:space:]]/, "", residual)
         if (residual != "" || network_count > 1 || port_count != 1) next
         network="*"
