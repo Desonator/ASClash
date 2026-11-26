@@ -8,8 +8,11 @@
 # ================================================================
 
 ASCLASH_API="https://api.github.com/repos/Desonator/ASClash/releases/latest"
-MIHOMO_BASE="https://github.com/MetaCubeX/mihomo/releases"
-MIHOMO_API="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+OFFICIAL_MIHOMO_REPO="MetaCubeX/mihomo"
+PRIZRAK_MIHOMO_REPO="legiz-ru/Prizrak-Core"
+MIHOMO_REPO=""
+MIHOMO_BASE=""
+MIHOMO_API=""
 CLASH_BIN="/opt/clash/bin/clash"
 
 # ASCLASH_VER и URL пакетов заполняются в fetch_asclash_release()
@@ -197,10 +200,10 @@ pkg_update() {
 install_deps() {
     log "Установка зависимостей: ${TPROXY_PKG} kmod-tun coreutils-base64"
     if [ "$PKG_MGR" = "apk" ]; then
-        apk add "$TPROXY_PKG" kmod-tun coreutils-base64 \
+        apk add firewall4 "$TPROXY_PKG" kmod-tun coreutils-base64 \
             || die "Ошибка установки зависимостей"
     else
-        opkg install "$TPROXY_PKG" kmod-tun coreutils-base64 \
+        opkg install firewall4 "$TPROXY_PKG" kmod-tun coreutils-base64 \
             || die "Ошибка установки зависимостей"
     fi
 }
@@ -208,6 +211,40 @@ install_deps() {
 # ================================================================
 #  5а. Получение последнего релиза ASClash через GitHub API
 # ================================================================
+choose_mihomo_source() {
+    local saved_repo="" default_choice="1" answer=""
+    if [ -f /opt/clash/settings ]; then
+        saved_repo=$(sed -n 's/^MIHOMO_RELEASE_REPO=//p' /opt/clash/settings | head -n 1)
+    fi
+    [ "$saved_repo" = "$PRIZRAK_MIHOMO_REPO" ] && default_choice="2"
+
+    case "${ASCLASH_KERNEL_SOURCE:-}" in
+        official) answer="1" ;;
+        prizrak) answer="2" ;;
+    esac
+
+    if [ -z "$answer" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        {
+            printf '\nВыберите источник ядра Mihomo:\n'
+            printf '  1) Официальный Mihomo (%s)\n' "$OFFICIAL_MIHOMO_REPO"
+            printf '  2) Prizrak-Core (%s)\n' "$PRIZRAK_MIHOMO_REPO"
+            printf 'Выбор [1/2, Enter — %s]: ' "$default_choice"
+        } > /dev/tty
+        IFS= read -r answer < /dev/tty || answer=""
+    fi
+
+    [ -n "$answer" ] || answer="$default_choice"
+    case "$answer" in
+        1) MIHOMO_REPO="$OFFICIAL_MIHOMO_REPO" ;;
+        2) MIHOMO_REPO="$PRIZRAK_MIHOMO_REPO" ;;
+        *) die "Неверный выбор источника ядра: $answer (допустимо 1 или 2)" ;;
+    esac
+
+    MIHOMO_BASE="https://github.com/$MIHOMO_REPO/releases"
+    MIHOMO_API="https://api.github.com/repos/$MIHOMO_REPO/releases/latest"
+    info "Источник ядра: $MIHOMO_REPO"
+}
+
 fetch_asclash_release() {
     log "Определяю последнюю версию ASClash..."
 
@@ -295,46 +332,105 @@ install_asclash() {
 # ================================================================
 #  6. Загрузка и установка ядра mihomo
 # ================================================================
+get_mihomo_asset_list() {
+    awk '
+        /"name"[[:space:]]*:/ {
+            line=$0
+            sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", line)
+            sub(/".*/, "", line)
+            asset_name=line
+        }
+        /"browser_download_url"[[:space:]]*:/ {
+            line=$0
+            sub(/.*"browser_download_url"[[:space:]]*:[[:space:]]*"/, "", line)
+            sub(/".*/, "", line)
+            if (asset_name != "" && line != "") print asset_name "|" line
+            asset_name=""
+        }
+    '
+}
+
+find_mihomo_asset() {
+    local owner_repo candidate_arches candidate expected asset_line matches count
+    owner_repo=$(printf '%s' "${MIHOMO_REPO#*/}" | tr '[:upper:]' '[:lower:]')
+    case "$MIHOMO_ARCH" in
+        amd64-compatible|amd64) candidate_arches="amd64-v1 amd64-compatible" ;;
+        *) candidate_arches="$MIHOMO_ARCH" ;;
+    esac
+
+    for candidate in $candidate_arches; do
+        for expected in "${owner_repo}-linux-${candidate}-${MIHOMO_VER}.gz" "mihomo-linux-${candidate}-${MIHOMO_VER}.gz"; do
+            asset_line=$(printf '%s\n' "$MIHOMO_ASSET_LIST" | awk -F'|' -v name="$expected" '$1 == name { print; exit }')
+            if [ -n "$asset_line" ]; then
+                MIHOMO_ASSET_FILENAME=${asset_line%%|*}
+                MIHOMO_URL=${asset_line#*|}
+                return 0
+            fi
+        done
+
+        matches=$(printf '%s\n' "$MIHOMO_ASSET_LIST" | awk -F'|' -v suffix="-linux-${candidate}-${MIHOMO_VER}.gz" '
+            $1 ~ /-linux-/ && length($1) >= length(suffix) \
+                && substr($1, length($1)-length(suffix)+1) == suffix \
+                && tolower($1) !~ /compressed/ { print }
+        ')
+        count=$(printf '%s\n' "$matches" | grep -c .)
+        if [ "$count" -eq 1 ]; then
+            MIHOMO_ASSET_FILENAME=${matches%%|*}
+            MIHOMO_URL=${matches#*|}
+            return 0
+        fi
+    done
+    return 1
+}
+
+persist_mihomo_source() {
+    local settings_file="/opt/clash/settings" temp_file
+    mkdir -p /opt/clash || return 1
+    temp_file="${settings_file}.tmp.$$"
+    if [ -f "$settings_file" ]; then
+        sed '/^MIHOMO_RELEASE_REPO=/d' "$settings_file" > "$temp_file" || return 1
+    else
+        : > "$temp_file" || return 1
+    fi
+    printf 'MIHOMO_RELEASE_REPO=%s\n' "$MIHOMO_REPO" >> "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+    mv -f "$temp_file" "$settings_file"
+}
+
 install_mihomo() {
     if [ -z "$MIHOMO_ARCH" ]; then
-        warn "Архитектура не определена автоматически."
-        warn "Вручную скачай нужное ядро: ${MIHOMO_BASE}/latest"
+        warn "Архитектура не определена автоматически; пропускаю загрузку ядра."
+        warn "Выбранный источник сохраните в LuCI: $MIHOMO_REPO"
         return 0
     fi
 
-    # Версию берём через GitHub API
-    log "Определяю последнюю версию mihomo..."
-    MIHOMO_JSON=$(curl -s -L "$MIHOMO_API") \
-        || die "Не удалось получить данные релиза mihomo. Проверь интернет-соединение."
-    [ -z "$MIHOMO_JSON" ] && die "GitHub API вернул пустой ответ (mihomo)"
+    log "Получаю последний стабильный релиз из $MIHOMO_REPO..."
+    MIHOMO_JSON=$(curl -f -s -L "$MIHOMO_API") \
+        || die "Не удалось получить релиз из $MIHOMO_REPO"
+    [ -n "$MIHOMO_JSON" ] || die "GitHub API вернул пустой ответ ($MIHOMO_REPO)"
 
-    # tag_name вида "v1.18.0" — используется и в URL, и в имени файла ассета
     MIHOMO_VER=$(printf '%s' "$MIHOMO_JSON" \
         | grep '"tag_name"' | head -1 \
         | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    [ -n "$MIHOMO_VER" ] || die "Не удалось распарсить tag_name из релиза $MIHOMO_REPO"
 
-    [ -z "$MIHOMO_VER" ] && die "Не удалось распарсить версию mihomo из ответа GitHub API"
-    info "Последняя версия mihomo: ${B}${MIHOMO_VER}${N}"
+    MIHOMO_ASSET_LIST=$(printf '%s' "$MIHOMO_JSON" | get_mihomo_asset_list)
+    if ! find_mihomo_asset; then
+        die "В релизе $MIHOMO_REPO нет однозначного архива .gz для архитектуры $MIHOMO_ARCH"
+    fi
+    info "Релиз: ${B}${MIHOMO_VER}${N}; asset: ${MIHOMO_ASSET_FILENAME}"
 
-    MIHOMO_URL="${MIHOMO_BASE}/download/${MIHOMO_VER}/mihomo-linux-${MIHOMO_ARCH}-${MIHOMO_VER}.gz"
-    info "URL: ${MIHOMO_URL}"
-
-    log "Загрузка ядра mihomo..."
     curl -fL --retry 2 --connect-timeout 15 --max-time 300 \
-        "$MIHOMO_URL" -o /tmp/clash.gz || die "Ошибка загрузки ядра mihomo"
+        "$MIHOMO_URL" -o /tmp/clash.gz || die "Не удалось загрузить ядро Mihomo"
 
-    log "Распаковка в ${CLASH_BIN}..."
     mkdir -p "$(dirname "$CLASH_BIN")"
-    gunzip -c /tmp/clash.gz > "$CLASH_BIN" || die "Ошибка распаковки"
+    gunzip -c /tmp/clash.gz > "$CLASH_BIN" || die "Не удалось распаковать ядро Mihomo"
     chmod +x "$CLASH_BIN"
     rm -f /tmp/clash.gz
-
-    if [ -f "/opt/clash/bin/meta-backup" ]; then
-        log "Удаляю резервную копию ядра mihomo..."
-        rm -f /opt/clash/bin/meta-backup
-    fi
-
-    log "Ядро установлено: $("$CLASH_BIN" -v 2>/dev/null || echo 'версия недоступна до запуска сервиса')"
+    persist_mihomo_source || die "Ядро установлено, но не удалось сохранить выбранный источник в /opt/clash/settings"
+    log "Ядро установлено: $("$CLASH_BIN" -v 2>/dev/null || echo 'версия станет доступна после запуска')"
 }
 
 # ================================================================
@@ -346,6 +442,7 @@ sep
 
 detect_openwrt
 ensure_curl      # нужен для всех последующих сетевых запросов
+choose_mihomo_source
 detect_arch
 fetch_asclash_release
 sep

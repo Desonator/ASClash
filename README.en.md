@@ -20,7 +20,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Forced DNS | Redirects client IPv4 TCP/UDP requests to router port 53 and reports active rules and conntrack-flow counters in Diagnostics. It follows interface-processing scope and exempts DIRECT sources. |
 | Grouped AND rules | Supported `AND` rules are translated into IPv4 nftables sets and compact protocol/port rules. Matching sources/sets can be reused while TCP/UDP and port conditions stay separate. |
 | Smart groups | An optional Status-page widget displays servers and weights for `type: smart` groups when the selected core exposes the required API. |
-| Kernel source | Choose official Mihomo, Prizrak-Core, or another compatible GitHub release repository. Router architecture is detected automatically. |
+| Kernel source | The installer offers official Mihomo or Prizrak-Core. The selection is saved in settings; router architecture is detected automatically. |
 | Service operation | Status notifications report service restarts and rule-list generation/application; the configuration page includes service controls and a dashboard link. |
 
 See [Traffic processing and IP-CIDR lists](#traffic-processing-and-ip-cidr-lists) for behavior and limitations.
@@ -39,13 +39,13 @@ Grouped AND rules are implemented with nftables only. ASClash targets firewall4/
 
 ### Automatic installation
 
-The installer detects OpenWrt and the router architecture, installs dependencies, ASClash and a compatible core from the selected release source:
+The installer detects OpenWrt and the router architecture, offers official Mihomo or Prizrak-Core, installs dependencies and the latest published ASClash package, then downloads a compatible core from the selected repository:
 
 ```sh
 wget --no-proxy -qO- https://github.com/Desonator/ASClash/raw/refs/heads/main/install-asclash.sh | ash
 ```
 
-Review the installer before running it. It installs the latest published ASClash release.
+Review the installer before running it. It installs the latest published ASClash release. On reruns, the current kernel source is the default choice; set `ASCLASH_KERNEL_SOURCE=official` or `ASCLASH_KERNEL_SOURCE=prizrak` for non-interactive use. Rerunning replaces the core with the latest release from the selected source.
 
 ### Manual installation
 
@@ -55,11 +55,11 @@ Review the installer before running it. It installs the latest published ASClash
 ```sh
 # OpenWrt 22.03–24.10
 opkg update
-opkg install kmod-nft-tproxy kmod-tun coreutils-base64 curl
+opkg install firewall4 kmod-nft-tproxy kmod-tun coreutils-base64 curl
 
 # OpenWrt 25+
 apk update
-apk add kmod-nft-tproxy kmod-tun coreutils-base64 curl
+apk add firewall4 kmod-nft-tproxy kmod-tun coreutils-base64 curl
 ```
 
 3. Install the downloaded package:
