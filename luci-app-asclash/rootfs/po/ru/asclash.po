@@ -1006,8 +1006,8 @@ msgstr "Гибридный режим (лучший для игр). TCP чере
 msgid "TUN Stack"
 msgstr "Стек TUN"
 
-msgid "Choose Mihomo TUN stack. `system` is fastest but depends on kernel capabilities; `gvisor` is more compatible; `mixed` combines both."
-msgstr "Выберите стек TUN для Mihomo. `system` самый быстрый, но зависит от возможностей ядра; `gvisor` более совместим; `mixed` сочетает оба подхода."
+msgid "Choose Mihomo TUN stack. `system` uses the kernel; `gvisor` uses a userspace stack; `mixed` combines them; `mips` uses Mihomo’s own stack."
+msgstr "Выберите стек TUN для Mihomo. `system` использует ядро; `gvisor` — стек в пользовательском пространстве; `mixed` сочетает оба варианта; `mips` использует собственный стек Mihomo."
 
 msgid "system: kernel network stack. If TCP in TUN fails on your device, try gvisor."
 msgstr "system: сетевой стек ядра. Если TCP в TUN не работает на вашем устройстве, попробуйте gvisor."
@@ -1017,6 +1017,9 @@ msgstr "gvisor: userspace-стек, обычно самый совместимы
 
 msgid "mixed: hybrid stack mode supported by some Mihomo builds."
 msgstr "mixed: гибридный режим стека, поддерживаемый некоторыми сборками Mihomo."
+
+msgid "mips: Mihomo userspace network stack; check support in your core build."
+msgstr "mips: сетевой стек Mihomo в пользовательском пространстве; проверьте его поддержку в вашей сборке ядра."
 
 msgid "Automatic Interface Detection"
 msgstr "Автоматическое определение интерфейсов"

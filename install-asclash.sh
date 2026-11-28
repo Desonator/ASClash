@@ -14,6 +14,7 @@ MIHOMO_REPO=""
 MIHOMO_BASE=""
 MIHOMO_API=""
 CLASH_BIN="/opt/clash/bin/clash"
+ASCLASH_SETTINGS_FILE="/opt/clash/settings"
 
 # ASCLASH_VER и URL пакетов заполняются в fetch_asclash_release()
 ASCLASH_VER=""
@@ -211,19 +212,29 @@ install_deps() {
 # ================================================================
 #  5а. Получение последнего релиза ASClash через GitHub API
 # ================================================================
+installer_has_tty() {
+    [ -r /dev/tty ] && [ -w /dev/tty ] || return 1
+    # Permission bits alone do not prove that this process has a controlling
+    # terminal (cron and remote command runners may still see /dev/tty).
+    ( : </dev/tty ) 2>/dev/null
+}
+
 choose_mihomo_source() {
-    local saved_repo="" default_choice="1" answer=""
-    if [ -f /opt/clash/settings ]; then
-        saved_repo=$(sed -n 's/^MIHOMO_RELEASE_REPO=//p' /opt/clash/settings | head -n 1)
+    local saved_repo="" default_choice="1" answer="" has_tty="false"
+    if [ -f "$ASCLASH_SETTINGS_FILE" ]; then
+        saved_repo=$(sed -n 's/^MIHOMO_RELEASE_REPO=//p' "$ASCLASH_SETTINGS_FILE" | head -n 1 | tr -d '\r')
     fi
     [ "$saved_repo" = "$PRIZRAK_MIHOMO_REPO" ] && default_choice="2"
 
     case "${ASCLASH_KERNEL_SOURCE:-}" in
         official) answer="1" ;;
         prizrak) answer="2" ;;
+        "") ;;
+        *) die "Неверное значение ASCLASH_KERNEL_SOURCE='${ASCLASH_KERNEL_SOURCE}'. Допустимо: official или prizrak." ;;
     esac
 
-    if [ -z "$answer" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    if [ -z "$answer" ] && installer_has_tty; then
+        has_tty="true"
         {
             printf '\nВыберите источник ядра Mihomo:\n'
             printf '  1) Официальный Mihomo (%s)\n' "$OFFICIAL_MIHOMO_REPO"
@@ -231,6 +242,15 @@ choose_mihomo_source() {
             printf 'Выбор [1/2, Enter — %s]: ' "$default_choice"
         } > /dev/tty
         IFS= read -r answer < /dev/tty || answer=""
+    fi
+
+    if [ -z "$answer" ] && [ "$has_tty" != "true" ]; then
+        if [ "$saved_repo" = "$OFFICIAL_MIHOMO_REPO" ] || [ "$saved_repo" = "$PRIZRAK_MIHOMO_REPO" ]; then
+            answer="$default_choice"
+            info "Терминал недоступен; использую ранее сохранённый источник: $saved_repo"
+        else
+            die "Нельзя показать меню выбора ядра без терминала. Запустите установщик интерактивно или задайте ASCLASH_KERNEL_SOURCE=official либо ASCLASH_KERNEL_SOURCE=prizrak."
+        fi
     fi
 
     [ -n "$answer" ] || answer="$default_choice"
@@ -384,7 +404,7 @@ find_mihomo_asset() {
 }
 
 persist_mihomo_source() {
-    local settings_file="/opt/clash/settings" temp_file
+    local settings_file="$ASCLASH_SETTINGS_FILE" temp_file
     mkdir -p /opt/clash || return 1
     temp_file="${settings_file}.tmp.$$"
     if [ -f "$settings_file" ]; then

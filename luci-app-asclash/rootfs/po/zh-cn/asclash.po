@@ -914,8 +914,8 @@ msgstr "混合模式（适合游戏）。TCP 走 TPROXY（稳定），UDP 走 TU
 msgid "TUN Stack"
 msgstr "TUN 栈"
 
-msgid "Choose Mihomo TUN stack. `system` is fastest but depends on kernel capabilities; `gvisor` is more compatible; `mixed` combines both."
-msgstr "选择 Mihomo TUN 栈。`system` 最快但依赖内核能力；`gvisor` 兼容性更好；`mixed` 结合两者。"
+msgid "Choose Mihomo TUN stack. `system` uses the kernel; `gvisor` uses a userspace stack; `mixed` combines them; `mips` uses Mihomo’s own stack."
+msgstr "选择 Mihomo TUN 栈。`system` 使用内核；`gvisor` 使用用户空间协议栈；`mixed` 结合两者；`mips` 使用 Mihomo 自有协议栈。"
 
 msgid "system: kernel network stack. If TCP in TUN fails on your device, try gvisor."
 msgstr "system：内核网络栈。如果设备上的 TUN TCP 失败，请尝试 gvisor。"
@@ -925,6 +925,9 @@ msgstr "gvisor：用户态网络栈，通常对各种路由器兼容性最好。
 
 msgid "mixed: hybrid stack mode supported by some Mihomo builds."
 msgstr "mixed：部分 Mihomo 构建支持的混合栈模式。"
+
+msgid "mips: Mihomo userspace network stack; check support in your core build."
+msgstr "mips：Mihomo 的用户空间网络协议栈；请确认你的核心版本支持此模式。"
 
 msgid "Automatic Interface Detection"
 msgstr "自动接口检测"

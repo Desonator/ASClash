@@ -7,6 +7,8 @@
 let startStopButton = null;
 let restartButton = null;
 let editor = null;
+let configApplyButtons = [];
+let configApplyInProgress = false;
 
 view_asclash_utils.bumpRpcTimeout();
 
@@ -235,7 +237,7 @@ async function initializeAceEditor(content) {
 // =============================================================================
 
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.44';
+const ASCLASH_VERSION = '4.8.2.45';
 
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
@@ -305,7 +307,13 @@ return view.extend({
 
         const validateAndStageConfig = async function() {
             const value = editor.getValue().trim() + '\n';
-            const previousConfig = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+            let previousConfig;
+            try {
+                previousConfig = await L.resolveDefault(fs.read('/opt/clash/config.yaml'), '');
+            } catch (e) {
+                throw new Error(_('Unable to save contents: %s').format('reading current config: ' + (e.message || String(e))));
+            }
+
             const staged = await view_asclash_utils.stageValidatedConfig(value);
             if (!staged.ok) {
                 ui.addNotification(null, E('div', {}, [
@@ -321,16 +329,22 @@ return view.extend({
         };
 
         const saveAndRestartCore = async function() {
-            if (startStopButton) startStopButton.disabled = true;
+            if (configApplyInProgress) return;
+            configApplyInProgress = true;
+            configApplyButtons.forEach(button => { if (button) button.disabled = true; });
+            let phase = 'staging and validating configuration';
             let stagedConfig = null;
             try {
                 stagedConfig = await validateAndStageConfig();
                 if (stagedConfig === null) return;
 
+                phase = 'reading firewall-list progress';
                 const progressBefore = await view_asclash_utils.getListProgress();
 
+                phase = 'committing configuration';
                 await view_asclash_utils.commitStagedConfig(stagedConfig.stagedPath);
                 ui.addNotification(null, E('p', _('Configuration saved successfully.')), 'info');
+                phase = 'dispatching service reload';
                 await view_asclash_utils.execDetached('/etc/init.d/clash reload');
 
                 ui.addNotification(null, E('p', _('Clash is restarting. Cached or currently available lists are applied first; provider-backed lists may be refreshed after the core starts.')), 'info');
@@ -351,14 +365,18 @@ return view.extend({
             } catch(e) {
                 if (stagedConfig && stagedConfig.stagedPath)
                     await view_asclash_utils.discardStagedConfig(stagedConfig.stagedPath);
-                ui.addNotification(null, E('p', _('Unable to save contents: %s').format(e.message)), 'error');
+                ui.addNotification(null, E('p', _('Unable to save contents: %s').format(phase + ': ' + (e.message || String(e)))), 'error');
             } finally {
-                if (startStopButton) startStopButton.disabled = false;
+                configApplyInProgress = false;
+                configApplyButtons.forEach(button => { if (button) button.disabled = false; });
             }
         };
 
         const saveAndReloadConfig = async function() {
-            if (startStopButton) startStopButton.disabled = true;
+            if (configApplyInProgress) return;
+            configApplyInProgress = true;
+            configApplyButtons.forEach(button => { if (button) button.disabled = true; });
+            let phase = 'checking service status';
             let staged = null;
             let configCommitted = false;
             let reloadAccepted = false;
@@ -374,11 +392,13 @@ return view.extend({
                 if (staged === null) return;
                 const value = staged.value;
 
+                phase = 'committing configuration';
                 await view_asclash_utils.commitStagedConfig(staged.stagedPath);
                 configCommitted = true;
 
                 // The helper reads the secret from config.yaml into a mode-600
                 // tmpfs curl config and refuses non-loopback controller addresses.
+                phase = 'reloading config through Mihomo API';
                 const res = await fs.exec('/opt/clash/bin/asclash-reload', []);
                 const responseLines = String(res.stdout || '').split(/\r?\n/);
                 const httpCode = (responseLines.pop() || '').trim();
@@ -444,10 +464,11 @@ return view.extend({
                     }
                 }
                 ui.addNotification(null, E('p',
-                    _('Config reload error: %s. Try "Save & Restart core" for a full restart.').format(e.message)
+                    _('Config reload error: %s. Try "Save & Restart core" for a full restart.').format(phase + ': ' + (e.message || String(e)))
                 ), 'error');
             } finally {
-                if (startStopButton) startStopButton.disabled = false;
+                configApplyInProgress = false;
+                configApplyButtons.forEach(button => { if (button) button.disabled = false; });
             }
         };
 
@@ -458,24 +479,24 @@ return view.extend({
                 ? 'position: absolute; top: 100%; right: 0; display: none; min-width: 220px; margin-top: 3px; background: #fff; color: #333; border: 1px solid rgba(0,0,0,0.2); border-radius: 3px; box-shadow: 0 3px 8px rgba(0,0,0,0.2); z-index: 1000;'
                 : 'position: absolute; top: 100%; right: 0; display: none; min-width: 220px; margin-top: 3px; background: #2b2b2b; color: #e0e0e0; border: 1px solid rgba(255,255,255,0.15); border-radius: 3px; box-shadow: 0 3px 8px rgba(0,0,0,0.5); z-index: 1000;'
         }, [
-            E('button', {
+            (configApplyButtons[1] = E('button', {
                 'class': 'btn',
                 'click': function() { splitMenu.style.display = 'none'; saveAndRestartCore(); },
                 'style': 'display: block; width: 100%; text-align: left; margin: 0; border: 0; border-radius: 0; background: transparent; padding: 8px 14px;' + (_light ? '' : ' color: #e0e0e0;'),
                 'title': _('Full restart: stops and starts the Mihomo core, rebuilds firewall rules and refreshes subscription IPs. Active connections are dropped.')
-            }, _('Save & Restart core'))
+            }, _('Save & Restart core')))
         ]);
 
         const splitContainer = E('div', {
             'class': 'asclash-split-btn',
             'style': 'display: inline-flex; align-items: stretch; position: relative;'
         }, [
-            E('button', {
+            (configApplyButtons[0] = E('button', {
                 'class': 'btn',
                 'click': saveAndReloadConfig,
                 'style': 'margin: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0;',
                 'title': _('Reload configuration via Mihomo API — active connections are preserved. Firewall rules are NOT rebuilt; use "Save & Restart core" when changing external-controller / tproxy-port / tun / fake-ip-filter-mode / proxy mode.')
-            }, _('Save & Reload config')),
+            }, _('Save & Reload config'))),
             E('button', {
                 'class': 'btn',
                 'style': 'margin: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 10px; padding-right: 10px;',

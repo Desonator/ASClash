@@ -203,8 +203,10 @@ async function writeFileAtomic(path, content) {
 
 async function stageValidatedConfig(content) {
     const tempPath = '/opt/clash/config.yaml.tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    let phase = 'writing temporary config';
     try {
         await writeFile(tempPath, content);
+        phase = 'running core config test';
         const result = await fs.exec('/opt/clash/bin/clash', ['-d', '/opt/clash', '-f', tempPath, '-t']);
         if (result.code !== 0) {
             const detail = formatClashTestError(result.stdout, result.stderr);
@@ -214,7 +216,7 @@ async function stageValidatedConfig(content) {
         return { ok: true, path: tempPath };
     } catch (e) {
         await removeFile(tempPath);
-        return { ok: false, detail: e.message || String(e) };
+        return { ok: false, detail: phase + ': ' + (e.message || String(e)) };
     }
 }
 

@@ -343,7 +343,7 @@ function transformProxyMode(content, proxyMode, tunStack) {
         }
     }
 
-    const normalizedTunStack = ['system', 'gvisor', 'mixed'].includes(tunStack) ? tunStack : 'system';
+    const normalizedTunStack = ['system', 'gvisor', 'mixed', 'mips'].includes(tunStack) ? tunStack : 'system';
     let configToInsert = [];
     switch (proxyMode) {
         case 'tproxy':
@@ -1517,7 +1517,7 @@ function createTunStackSection(currentTunStack) {
 
     container.appendChild(E('h3', _('TUN Stack')));
     container.appendChild(E('div', { 'class': 'cbi-section-descr' },
-        _('Choose Mihomo TUN stack. `system` is fastest but depends on kernel capabilities; `gvisor` is more compatible; `mixed` combines both.')
+        _('Choose Mihomo TUN stack. `system` uses the kernel; `gvisor` uses a userspace stack; `mixed` combines them; `mips` uses Mihomo’s own stack.')
     ));
 
     const select = E('select', {
@@ -1526,7 +1526,8 @@ function createTunStackSection(currentTunStack) {
     }, [
         E('option', { 'value': 'system' }, 'system'),
         E('option', { 'value': 'gvisor' }, 'gvisor'),
-        E('option', { 'value': 'mixed' }, 'mixed')
+        E('option', { 'value': 'mixed' }, 'mixed'),
+        E('option', { 'value': 'mips' }, 'mips')
     ]);
 
     const hint = E('div', {
@@ -1542,13 +1543,16 @@ function createTunStackSection(currentTunStack) {
         } else if (value === 'gvisor') {
             hint.textContent = _('gvisor: userspace stack, usually most compatible across routers.');
             hint.style.borderLeftColor = '#28a745';
-        } else {
+        } else if (value === 'mixed') {
             hint.textContent = _('mixed: hybrid stack mode supported by some Mihomo builds.');
             hint.style.borderLeftColor = '#ff9900';
+        } else {
+            hint.textContent = _('mips: Mihomo userspace network stack; check support in your core build.');
+            hint.style.borderLeftColor = '#28a745';
         }
     }
 
-    const effectiveStack = ['system', 'gvisor', 'mixed'].includes(currentTunStack) ? currentTunStack : 'system';
+    const effectiveStack = ['system', 'gvisor', 'mixed', 'mips'].includes(currentTunStack) ? currentTunStack : 'system';
     setTimeout(() => {
         select.value = effectiveStack;
         updateHint();

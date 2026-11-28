@@ -46,7 +46,7 @@ The installer detects OpenWrt and the router architecture, offers official Mihom
 wget --no-proxy -qO- https://github.com/Desonator/ASClash/raw/refs/heads/main/install-asclash.sh | ash
 ```
 
-Review the installer before running it. It installs the latest published ASClash release. On reruns, the current kernel source is the default choice; set `ASCLASH_KERNEL_SOURCE=official` or `ASCLASH_KERNEL_SOURCE=prizrak` for non-interactive use. Rerunning replaces the core with the latest release from the selected source.
+Review the installer before running it. It installs the latest published ASClash release. An interactive terminal shows the official Mihomo / Prizrak-Core choice; on reruns, the saved source is preselected. If no terminal is available and no source has been saved yet, the installer stops with instructions: set `ASCLASH_KERNEL_SOURCE=official` or `ASCLASH_KERNEL_SOURCE=prizrak`. The variable can also explicitly override a saved choice. Rerunning replaces the core with the latest release from the selected source.
 
 ### Manual installation
 
@@ -97,7 +97,9 @@ Available network modes:
 - **TUN** — route traffic through the `clash-tun` interface.
 - **MIXED** — TCP uses TPROXY; UDP uses TUN.
 
-For TUN/MIXED, ASClash configures policy routing and watches for `clash-tun`. The TUN stack (`system`, `gvisor` or `mixed`) is selected in the Mihomo configuration; availability depends on the chosen core.
+For TUN/MIXED, ASClash configures policy routing and watches for `clash-tun`. Core-supported TUN stacks are `system`, `gvisor`, `mixed` and `mips`; availability depends on the core build. ASClash lets you select each of these options.
+
+ASClash's network mode and Mihomo's top-level `mode` are separate settings. In `rule`, Mihomo applies `rules`; `global` uses the selected GLOBAL group; `direct` sends connections directly. For TUN/MIXED, the `tun` section must be enabled (`tun.enable: true`). ASClash owns policy routing, so keep Mihomo's `tun.auto-route: false`, `tun.auto-redirect: false`, `tun.auto-detect-interface: false` and `tun.device: clash-tun` (the ASClash settings generator sets these values). Enabling the core's automatic routes in parallel can change traffic scope and routing paths; the service warns about conflicting values. In TPROXY/MIXED, the firewall uses the config's `tproxy-port`, defaulting to `7894` when omitted.
 
 Additional settings include QUIC blocking (reject UDP/443), forced client DNS redirection (IPv4 TCP/UDP 53), placing rule sets and proxy providers in RAM (`tmpfs`), adding HWID headers to proxy-provider requests (Remnawave compatibility; header values are configurable), and showing Smart-group weights on the Status page.
 
@@ -129,7 +131,7 @@ Select a device with a permanent IPv4 DHCP reservation in Settings. ASClash adds
 
 ### Fake-IP and real IP addresses
 
-With `fake-ip-filter-mode: whitelist`, Mihomo returns Fake-IP addresses only for DNS names selected by its whitelist logic. With `rule`, it checks `fake-ip-filter` from top to bottom and chooses `fake-ip` or `real-ip` for each match. Fake-IP traffic is identified by the configured range.
+The core's `dns.enhanced-mode` values are `fake-ip`, `redir-host` and `normal`. ASClash recognizes all three; Fake-IP routing is not applied in `normal` mode. `fake-ip-filter-mode` supports `blacklist` (the default), `whitelist` and `rule`. In `whitelist`, Mihomo returns Fake-IP only for matching domains; in `rule`, it checks the list from top to bottom and selects `fake-ip` or `real-ip`. Fake-IP traffic is identified by the configured range.
 
 For a domain resolved to a real IP, the firewall cannot infer the original domain from an arbitrary DNS answer. That traffic reaches Mihomo only if it matches an IP-CIDR set or another interception rule; otherwise it may bypass the core. This is particularly important for domain rules that return `real-ip`.
 
@@ -138,6 +140,10 @@ For a domain resolved to a real IP, the firewall cannot infer the original domai
 ### Forced DNS redirection
 
 The **Force client DNS through the router** option intercepts new IPv4 TCP and UDP requests to port 53 and redirects them to the router's local DNS resolver (dnsmasq, which must listen on the standard port 53). While the ASClash service is running, dnsmasq uses the upstream configured by ASClash for Mihomo. This also catches requests sent to manually configured resolvers such as `8.8.8.8:53`.
+
+When Mihomo DNS is enabled, ASClash points dnsmasq to `dns.listen` from the config and disables the dnsmasq cache (`cachesize=0`) to avoid maintaining a second DNS cache alongside Mihomo's. With `dns.enable: false`, ASClash leaves dnsmasq upstream settings unchanged.
+
+Load depends on query rate, active clients, caching and upstream configuration. Redirection adds a firewall check for new DNS flows; it is not a separate continuous poll. To estimate overhead on a particular router, compare CPU and free memory during normal use and typical network activity. A universal cost figure without measurements on the device would be misleading.
 
 The redirect follows interface scope: **Explicit** applies only to selected interfaces; **Exclude** applies to all interfaces except excluded ones. WAN ingress, router-originated DNS and the `clash-tun` interface are not redirected. In Explicit mode with Fake-IP `whitelist`/`rule`, sources matching a simple `SRC-IP-CIDR,...,DIRECT` rule are exempt from this firewall redirect. This option does not create a per-device DNS upstream: clients already using the router DNS from DHCP continue to use dnsmasq's shared upstream.
 

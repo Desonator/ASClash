@@ -65,11 +65,13 @@ jobs:
           node --check tests/test-kernel-install.js
           node --check tests/test-localization-parity.js
           node --check tests/test-api-helper-acl.js
+          node --check tests/test-config-apply-guard.js
 
           node tests/test-localization-parity.js
           node tests/test-managed-direct-rule-edit.js
           node tests/test-kernel-install.js
           node tests/test-api-helper-acl.js
+          node tests/test-config-apply-guard.js
           for test in tests/*.sh; do sh "$test"; done
           msgfmt --check -o /dev/null luci-app-asclash/rootfs/po/ru/asclash.po
           msgfmt --check -o /dev/null luci-app-asclash/rootfs/po/zh-cn/asclash.po
