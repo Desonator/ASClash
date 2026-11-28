@@ -1605,3 +1605,39 @@ msgstr "另一个 ASClash 更新正在进行。"
 msgid "Starting ASClash update…"
 msgstr "正在启动 ASClash 更新…"
 
+msgid "Processing performance"
+msgstr "处理性能"
+
+msgid "Last rule-list cycle. Timings include nested stages and must not be added together. Clock resolution: approximately 10 ms."
+msgstr "最近一次规则列表处理。计时包含嵌套阶段，请勿相加。时钟分辨率约为 10 毫秒。"
+
+msgid "%d ms · Calls: %d · Errors: %d"
+msgstr "%d 毫秒 · 调用：%d · 错误：%d"
+
+msgid "Cache hit"
+msgstr "缓存命中"
+
+msgid "Cache miss"
+msgstr "缓存未命中"
+
+msgid "Configuration parsing"
+msgstr "配置解析"
+
+msgid "Provider scanning"
+msgstr "提供者扫描"
+
+msgid "Provider parsing"
+msgstr "提供者解析"
+
+msgid "Parsed providers"
+msgstr "已解析的提供者"
+
+msgid "Firewall application"
+msgstr "防火墙应用"
+
+msgid "Grouped nftables application"
+msgstr "分组 nftables 应用"
+
+msgid "IP-CIDR set application"
+msgstr "IP-CIDR 集合应用"
+

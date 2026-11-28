@@ -1621,3 +1621,39 @@ msgstr "Обновление ASClash уже выполняется."
 msgid "Starting ASClash update…"
 msgstr "Запуск обновления ASClash…"
 
+msgid "Processing performance"
+msgstr "Производительность обработки"
+
+msgid "Last rule-list cycle. Timings include nested stages and must not be added together. Clock resolution: approximately 10 ms."
+msgstr "Последний цикл обработки списков. Замеры включают вложенные этапы и не суммируются. Разрешение часов: около 10 мс."
+
+msgid "%d ms · Calls: %d · Errors: %d"
+msgstr "%d мс · Вызовов: %d · Ошибок: %d"
+
+msgid "Cache hit"
+msgstr "Попадание в кеш"
+
+msgid "Cache miss"
+msgstr "Промах кеша"
+
+msgid "Configuration parsing"
+msgstr "Разбор конфигурации"
+
+msgid "Provider scanning"
+msgstr "Сканирование provider-ов"
+
+msgid "Provider parsing"
+msgstr "Разбор provider-ов"
+
+msgid "Parsed providers"
+msgstr "Разобранные provider-ы"
+
+msgid "Firewall application"
+msgstr "Применение firewall"
+
+msgid "Grouped nftables application"
+msgstr "Применение grouped nftables"
+
+msgid "IP-CIDR set application"
+msgstr "Применение IP-CIDR-набора"
+

@@ -347,14 +347,25 @@ function formatGroupedSkipReason(reason) {
 	return reason;
 }
 
+function performanceStageLabel(stage) {
+	return ({ config_parse: _('Configuration parsing'), provider_scan: _('Provider scanning'),
+		provider_parse: _('Provider parsing'), provider: _('Parsed providers'),
+		plain_list: _('IP-CIDR list without conditions'), grouped_list: _('IP-CIDR list with AND conditions'),
+		firewall_apply: _('Firewall application'), grouped_nft: _('Grouped nftables application'),
+		plain_nft: _('IP-CIDR set application') })[stage] || stage;
+}
+
 function parseListDiagnostics(text) {
 	const report = {
+		performance: { timings: [], cache: [] },
 		cycle: { phase: 'unknown', time: 0, trigger: 'unknown' },
 		fakeip: { state: 'unknown', fallback: false, issues: [] },
 		grouped: { state: 'unknown', fallback: false, issues: [] }
 	};
 	for (const line of String(text || '').split(/\r?\n/).filter(Boolean)) {
 		const [kind, a, b, c, d] = line.split('|');
+		if (kind === 'timing') report.performance.timings.push({ stage: a, ms: Number(b) || 0, calls: Number(c) || 0, errors: Number(d) || 0 });
+		else if (kind === 'cache') report.performance.cache.push({ stage: a, outcome: b, count: Number(c) || 0 });
 		if (kind === 'cycle') report.cycle = { phase: a || 'unknown', time: Number(b) || 0, trigger: c || 'unknown' };
 		else if (kind === 'fakeip') report.fakeip = { ...report.fakeip, state: a || 'unknown', fallback: b === 'true' };
 		else if (kind === 'grouped') report.grouped = { ...report.grouped, state: a || 'unknown', fallback: b === 'true' };
@@ -603,7 +614,15 @@ return view.extend({
 			E('div', { 'style': 'display:grid;gap:8px;' }, [
 				listSection(_('IP-CIDR list without conditions'), fakeSectionState, fakeStatus,
 					_('CIDR entries: %d · Providers: %d').format(whitelist.total, whitelist.providers.length), fakeNote),
-				listSection(_('IP-CIDR list with AND conditions'), groupedSectionState, groupedStatus, groupedMetrics, groupedNote)
+					listSection(_('IP-CIDR list with AND conditions'), groupedSectionState, groupedStatus, groupedMetrics, groupedNote),
+					E('details', {}, [
+						E('summary', {}, _('Processing performance')),
+						E('p', { 'class': 'cbi-section-descr' }, _('Last rule-list cycle. Timings include nested stages and must not be added together. Clock resolution: approximately 10 ms.')),
+						E('div', {}, listDiagnostics.performance.timings.map(row => E('div', {},
+							performanceStageLabel(row.stage) + ': ' + _('%d ms · Calls: %d · Errors: %d').format(row.ms, row.calls, row.errors)))),
+						E('div', {}, listDiagnostics.performance.cache.map(row => E('div', {},
+							performanceStageLabel(row.stage) + ': ' + (row.outcome === 'hit' ? _('Cache hit') : _('Cache miss')) + ' × ' + row.count)))
+					])
 			])
 		]);
 

@@ -43,7 +43,7 @@ INCLUDED_INTERFACES=""
 EXCLUDED_INTERFACES=""
 # Populated in start() when fake-ip-filter-mode: whitelist or rule is detected
 FAKE_IP_FILTER_MODE="blacklist"
-FAKEIP_WHITELIST_IPS=""
+FAKEIP_WHITELIST_IPS_FILE="/tmp/clash/fakeip_whitelist_ips"
 # Auto-generate the fakeip whitelist IP-CIDR list from IP-CIDR entries found in
 # rule-providers that are referenced by rules with a non-DIRECT action. Set to
 # "false" in /opt/clash/settings to disable and manage the file entirely by hand.
@@ -198,11 +198,43 @@ set_list_progress() {
     mv -f "$tmp_file" "$ASCLASH_LIST_PROGRESS_FILE"
 }
 
+# /proc/uptime is monotonic and available on OpenWrt without GNU date.
+profile_now_ms() {
+    awk '{ printf "%.0f\n", $1 * 1000 }' /proc/uptime
+}
+
+# Run in the current shell: generators publish state in shell variables.
+# Appending records also works for parsers invoked inside command substitution.
+profile_run() {
+    local profile_stage="$1" profile_started profile_rc profile_finished
+    shift
+    if [ -z "$ASCLASH_PROFILE_FILE" ]; then
+        "$@"
+        return $?
+    fi
+    profile_started=$(profile_now_ms)
+    "$@"
+    profile_rc=$?
+    profile_finished=$(profile_now_ms)
+    printf 'timing|%s|%s|%s\n' "$profile_stage" "$((profile_finished - profile_started))" "$profile_rc" >> "$ASCLASH_PROFILE_FILE"
+    return "$profile_rc"
+}
+
 write_list_diagnostics() {
     local tmp_file="${ASCLASH_LIST_DIAGNOSTICS_FILE}.$$" provider path reason
     mkdir -p "$(dirname "$ASCLASH_LIST_DIAGNOSTICS_FILE")" 2>/dev/null || return 1
     {
         printf 'cycle|%s|%s|%s\n' "$ASCLASH_LIST_CYCLE_PHASE" "$ASCLASH_LIST_CYCLE_TIME" "$ASCLASH_LIST_CYCLE_TRIGGER"
+        if [ -f "$ASCLASH_PROFILE_FILE" ]; then
+            awk -F'|' '
+                $1 == "timing" { total[$2]+=$3; calls[$2]++; if ($4 != 0) errors[$2]++ }
+                $1 == "cache" { cache[$2 FS $3]++ }
+                END {
+                    for (stage in total) print "timing|" stage "|" total[stage] "|" calls[stage] "|" (errors[stage]+0)
+                    for (key in cache) print "cache|" key "|" cache[key]
+                }
+            ' "$ASCLASH_PROFILE_FILE"
+        fi
         printf 'fakeip|%s|%s\n' "$ASCLASH_FAKEIP_STATE" "$ASCLASH_FAKEIP_FALLBACK"
         printf '%s\n' "$ASCLASH_FAKEIP_ISSUES" | while IFS='|' read -r provider path reason; do
             [ -n "$provider$path$reason" ] || continue
@@ -226,6 +258,9 @@ write_list_diagnostics() {
 }
 
 begin_list_diagnostics() {
+    ASCLASH_PROFILE_FILE="/tmp/clash/asclash-profile"
+    mkdir -p /tmp/clash
+    : > "$ASCLASH_PROFILE_FILE"
     ASCLASH_LIST_CYCLE_ID="${2:-cycle-$$}"
     ASCLASH_LIST_CYCLE_PHASE="$1"
     ASCLASH_LIST_CYCLE_TRIGGER="${3:-startup}"
@@ -1328,6 +1363,10 @@ select_rule_provider_rows() {
 # byte-identical sets shared by different network/port rules. Exact CIDRs
 # already present in the ordinary AUTO_FAKEIP_WHITELIST output are removed.
 generate_grouped_port_sources() {
+    profile_run grouped_list generate_grouped_port_sources_impl
+}
+
+generate_grouped_port_sources_impl() {
     # Do not parse large provider files unless the grouped feature is enabled.
     # The previous implementation generated diagnostic files even while the
     # feature was disabled, causing unnecessary CPU/RAM pressure on routers.
@@ -1338,7 +1377,7 @@ generate_grouped_port_sources() {
 
     local rules providers referenced_providers base_dir auto_file metadata rule provider network ports action ui_summary source_map ui_rows provider_ui_map provider_ui_counts
     rules="$(extract_grouped_port_rules)"
-    providers="$(extract_rule_providers)"
+    providers="$(profile_run config_parse extract_rule_providers)"
     local rule_set_names classical_candidates
     rule_set_names=$(extract_proxy_rule_set_names)
     classical_candidates=$(printf '%s\n%s\n' "$rule_set_names" "$(printf '%s\n' "$rules" | awk -F'|' 'NF >= 4 { n=split($1,a,";"); for(i=1;i<=n;i++) if(a[i] ~ /^RULE-SET:/) {sub(/^RULE-SET:/,"",a[i]); print a[i]} }')" | grep -v '^$' | sort -u)
@@ -1348,21 +1387,38 @@ generate_grouped_port_sources() {
     fi
     referenced_providers=$(select_rule_provider_rows "$providers" "$classical_candidates")
     base_dir="$(get_providers_base_dir)"
-    local digest_input grouped_digest saved_digest
-    digest_input=$(printf 'generator=4\n%s\n%s\n%s\nlimits=%s|%s\n' \
+    local digest_input grouped_digest saved_digest scan_started
+    scan_started=$(profile_now_ms)
+    digest_input=$(printf 'generator=5\n%s\n%s\n%s\nlimits=%s|%s\n' \
         "$CONFIG_FILE" "$rules" "$classical_candidates" \
         "$GROUPED_FAKEIP_MAX_GROUPS" "$GROUPED_FAKEIP_MAX_CIDRS")
+    # Grouped sources subtract the unconditional AUTO block. Its contents are
+    # a dependency even when all grouped provider files remain unchanged.
+    local auto_digest
+    auto_digest=$(awk '
+        /^#[[:space:]]*AUTO-BEGIN/ { active=1; next }
+        /^#[[:space:]]*AUTO-END/ { active=0; next }
+        active && $0 !~ /^#/ && NF { print }
+    ' "$FAKEIP_WHITELIST_FILE" 2>/dev/null | md5sum)
+    digest_input="$digest_input\nauto=${auto_digest%% *}"
     while IFS='|' read -r _provider _behavior _type _path; do
         case "$_path" in
             ./*) _full="$base_dir/${_path#./}" ;;
             /*) _full="$_path" ;;
             *) _full="$base_dir/$_path" ;;
         esac
-        [ -f "$_full" ] && digest_input="$digest_input\n$_provider|$_behavior|$_type|$_path|$_full:$(md5sum "$_full" 2>/dev/null | awk '{print $1}')"
+        [ -n "$_provider" ] || continue
+        digest_input="$digest_input\n$_provider|$_behavior|$_type|$_path"
+        if [ -f "$_full" ]; then
+            digest_input="$digest_input\n$_full:$(md5sum "$_full" 2>/dev/null | awk '{print $1}')"
+        else
+            digest_input="$digest_input\nmissing:$_full"
+        fi
     done <<EOF
 $referenced_providers
 EOF
     grouped_digest=$(printf '%b\n' "$digest_input" | md5sum | awk '{print $1}')
+    [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'timing|provider_scan|%s|0\n' "$(($(profile_now_ms) - scan_started))" >> "$ASCLASH_PROFILE_FILE"
     saved_digest=""
     [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && saved_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
     if [ -n "$saved_digest" ] && [ "$grouped_digest" = "$saved_digest" ] \
@@ -1371,8 +1427,10 @@ EOF
        && [ -s "$GROUPED_FAKEIP_STATS_FILE" ] \
        && [ -s "$GROUPED_FAKEIP_SUMMARY_FILE" ]; then
         msg "Grouped fakeip sources unchanged, skipping regeneration"
+        [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'cache|grouped_list|hit\n' >> "$ASCLASH_PROFILE_FILE"
         return 0
     fi
+    [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'cache|grouped_list|miss\n' >> "$ASCLASH_PROFILE_FILE"
     : > "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
     auto_file="/tmp/clash/fakeip_auto_entries.$$"
     metadata="/tmp/clash/fakeip_port_groups"
@@ -1426,7 +1484,17 @@ EOF
         nested_source="/tmp/clash/fakeip_nested_${provider_cache_key}.txt"
         nested_filtered="${nested_source}.filtered"
         nested_counts="${nested_source}.counts"
-        extract_classical_and_ipcidr_entries "$full_path" | filter_valid_provider_entries > "$nested_source"
+        local nested_raw="${nested_source}.raw.$$"
+        if ! extract_classical_and_ipcidr_entries "$full_path" > "$nested_raw"; then
+            rm -f "$nested_raw" "$nested_source" "$nested_filtered" "$nested_counts"
+            printf '%s|%s|parse-error\n' "$provider" "$full_path" >> "$GROUPED_FAKEIP_MISSING_SOURCES_FILE"
+            continue
+        fi
+        filter_valid_provider_entries < "$nested_raw" > "$nested_source" || {
+            rm -f "$nested_raw" "$nested_source" "$nested_filtered" "$nested_counts"
+            return 1
+        }
+        rm -f "$nested_raw"
         [ -s "$nested_source" ] || { rm -f "$nested_source" "$nested_filtered" "$nested_counts"; continue; }
         provider_ui_key=$(printf '%s' "$provider" | md5sum 2>/dev/null | awk '{print $1}')
         provider_ui_file="/tmp/clash/fakeip_provider_ui_${provider_ui_key}_nested.cidr"
@@ -1678,6 +1746,10 @@ EOF
 # Apply the grouped port sources as native IPv4 nft sets plus dport rules.
 # This avoids the memory-heavy ipv4_addr . inet_service concatenation set.
 apply_grouped_port_nft_rules() {
+    profile_run grouped_nft apply_grouped_port_nft_rules_impl
+}
+
+apply_grouped_port_nft_rules_impl() {
     [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ] || return 0
     if [ ! -s /tmp/clash/fakeip_port_groups ]; then
         rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
@@ -1953,9 +2025,92 @@ extract_fake_ip_filter_rule_sets_comma_fake_ip() {
 # row containing ':' is skipped — IPv6 is not handled by the firewall today).
 # For ipcidr files we keep only IPv4 CIDR rows.
 # Comments (# …) and blank lines are ignored. Output is one CIDR per line.
+# Cache only completed parses. Callers outside the operation lock still parse,
+# but never mutate shared cache state. Bump v1 when parser semantics change.
+parsed_provider_cache() {
+    local file="$1" behavior="$2" kind="$3"
+    local dir="/tmp/clash/parsed_provider_cache" digest key entry work rc format=text hash=sha256sum
+    [ -f "$file" ] || return 0
+    case "$file" in *.mrs) format=mrs ;; esac
+    if [ "${ASCLASH_OPERATION_LOCK_HELD:-false}" != "true" ]; then
+        [ -z "${ASCLASH_PROFILE_FILE:-}" ] || printf 'cache|provider|miss\n' >> "$ASCLASH_PROFILE_FILE"
+        case "$kind" in
+            ipv4) profile_run provider_parse extract_ipv4_cidr_from_rule_provider_file "$file" "$behavior" uncached ;;
+            nested) profile_run provider_parse extract_classical_and_ipcidr_entries "$file" uncached ;;
+        esac
+        return $?
+    fi
+    command -v sha256sum >/dev/null 2>&1 || hash=md5sum
+    digest=$("$hash" "$file" 2>/dev/null) || return 2
+    digest=${digest%% *}
+    key=$(printf '%s\n' "$digest|$behavior|$kind|$format|v1" | "$hash") || return 2
+    key=${key%% *}
+    [ ! -L "$dir" ] || return 2
+    mkdir -p "$dir" || return 2
+    entry="$dir/$key.parsed"
+    if [ -f "$entry" ] && [ ! -L "$entry" ]; then
+        [ -z "${ASCLASH_PROFILE_FILE:-}" ] || printf 'cache|provider|hit\n' >> "$ASCLASH_PROFILE_FILE"
+        cat "$entry"
+        return $?
+    fi
+    [ -z "${ASCLASH_PROFILE_FILE:-}" ] || printf 'cache|provider|miss\n' >> "$ASCLASH_PROFILE_FILE"
+    work=$(mktemp "$dir/.parse.XXXXXX") || return 2
+    case "$kind" in
+        ipv4) profile_run provider_parse extract_ipv4_cidr_from_rule_provider_file "$file" "$behavior" uncached > "$work" ;;
+        nested) profile_run provider_parse extract_classical_and_ipcidr_entries "$file" uncached > "$work" ;;
+        *) rm -f "$work"; return 2 ;;
+    esac
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        rm -f "$work"
+        return "$rc"
+    fi
+    # Do not publish if a provider download replaced the source during parsing.
+    local after
+    after=$("$hash" "$file" 2>/dev/null) || { rm -f "$work"; return 2; }
+    if [ "${after%% *}" != "$digest" ]; then
+        rm -f "$work"
+        return 2
+    fi
+    # Cap cache at 64 entries and 16 MiB; oversized results are streamed only.
+    local size total count old
+    size=$(wc -c < "$work")
+    if [ "$size" -le 16777216 ]; then
+        total="$size"; count=1
+        for old in "$dir"/*.parsed; do
+            [ -f "$old" ] && [ ! -L "$old" ] || continue
+            total=$((total + $(wc -c < "$old")))
+            count=$((count + 1))
+        done
+        for old in "$dir"/*.parsed; do
+            [ "$total" -le 16777216 ] && [ "$count" -le 64 ] && break
+            [ -f "$old" ] && [ ! -L "$old" ] || continue
+            total=$((total - $(wc -c < "$old")))
+            count=$((count - 1))
+            rm -f "$old"
+        done
+        mv -f "$work" "$entry" || { rm -f "$work"; return 2; }
+        cat "$entry"
+    else
+        cat "$work"
+        rc=$?
+        rm -f "$work"
+        return "$rc"
+    fi
+}
+
 extract_ipv4_cidr_from_rule_provider_file() {
     local file="$1"
     local behavior="$2"
+
+    # Domain-only providers cannot contribute IPv4 CIDRs: do not hash or
+    # cache their potentially large files on the ordinary list path.
+    case "$behavior" in classical|ipcidr) ;; *) return 0 ;; esac
+
+    if [ "${3:-}" != "uncached" ] && command -v parsed_provider_cache >/dev/null 2>&1; then
+        parsed_provider_cache "$file" "$behavior" ipv4
+        return $?
+    fi
 
     [ -f "$file" ] || return 0
 
@@ -1965,36 +2120,59 @@ extract_ipv4_cidr_from_rule_provider_file() {
         *) return 0 ;;
     esac
 
-    # .mrs files cannot be parsed as text — convert to text and cache persistently.
-    # Cache lives in /opt/clash/lst/mrs_cache/ (outside tmpfs) so it survives reboots.
-    # Invalidation is content-based (md5sum of source .mrs), not mtime-based, so
-    # provider re-downloads with unchanged content do not trigger re-conversion.
+    # Preserve reboot reuse with content/behavior keyed, atomic conversions.
     local parse_file="$file"
     case "$file" in
         *.mrs)
-            local mrs_cache_dir="/opt/clash/lst/mrs_cache"
-            local base_name
-            base_name="$(basename "$file" .mrs)"
-            local cache_file="$mrs_cache_dir/${base_name}.txt"
-            local sig_file="$mrs_cache_dir/${base_name}.sig"
-            mkdir -p "$mrs_cache_dir"
-
-            local current_sig cached_sig=""
-            current_sig=$(md5sum "$file" 2>/dev/null | awk '{print $1}')
-            [ -f "$sig_file" ] && cached_sig=$(cat "$sig_file" 2>/dev/null)
-
-            if [ -z "$current_sig" ] || [ "$current_sig" != "$cached_sig" ] || [ ! -s "$cache_file" ]; then
-                if ! /opt/clash/bin/clash convert-ruleset "$behavior" mrs "$file" "$cache_file" 2>/dev/null \
-                     || [ ! -s "$cache_file" ]; then
-                    rm -f "$cache_file" "$sig_file"
+            local cache_file conversion_dir="/opt/clash/lst/mrs_cache" conversion_key conversion_entry conversion_hash=sha256sum
+            mkdir -p /tmp/clash || return 2
+            command -v sha256sum >/dev/null 2>&1 || conversion_hash=md5sum
+            conversion_key=$("$conversion_hash" "$file" 2>/dev/null) || return 2
+            conversion_key="v1_${behavior}_${conversion_key%% *}"
+            conversion_entry="$conversion_dir/$conversion_key.txt"
+            if [ -f "$conversion_entry" ] && [ ! -L "$conversion_entry" ]; then
+                parse_file="$conversion_entry"
+            else
+                cache_file=$(mktemp /tmp/clash/provider_mrs.XXXXXX) || return 2
+                if ! /opt/clash/bin/clash convert-ruleset "$behavior" mrs "$file" "$cache_file" 2>/dev/null; then
+                    rm -f "$cache_file"
                     return 2
                 fi
-                printf '%s\n' "$current_sig" > "$sig_file"
+                local after_conversion
+                after_conversion=$("$conversion_hash" "$file" 2>/dev/null) || { rm -f "$cache_file"; return 2; }
+                if [ "v1_${behavior}_${after_conversion%% *}" != "$conversion_key" ]; then
+                    rm -f "$cache_file"
+                    return 2
+                fi
+                parse_file="$cache_file"
+                if [ "${ASCLASH_OPERATION_LOCK_HELD:-false}" = true ] && [ ! -L "$conversion_dir" ] && mkdir -p "$conversion_dir"; then
+                    local staged old conversion_count=1 conversion_bytes
+                    conversion_bytes=$(wc -c < "$cache_file")
+                    if [ "$conversion_bytes" -le 16777216 ]; then
+                        for old in "$conversion_dir"/v1_*.txt; do
+                            [ -f "$old" ] && [ ! -L "$old" ] || continue
+                            conversion_count=$((conversion_count + 1))
+                            conversion_bytes=$((conversion_bytes + $(wc -c < "$old")))
+                        done
+                        for old in "$conversion_dir"/v1_*.txt; do
+                            [ "$conversion_count" -le 64 ] && [ "$conversion_bytes" -le 16777216 ] && break
+                            [ -f "$old" ] && [ ! -L "$old" ] || continue
+                            conversion_count=$((conversion_count - 1))
+                            conversion_bytes=$((conversion_bytes - $(wc -c < "$old")))
+                            rm -f "$old"
+                        done
+                        staged=$(mktemp "$conversion_dir/.conversion.XXXXXX") || { rm -f "$cache_file"; return 2; }
+                        if ! cp "$cache_file" "$staged" || ! mv -f "$staged" "$conversion_entry"; then
+                            rm -f "$staged" "$cache_file"
+                            return 2
+                        fi
+                    fi
+                fi
             fi
-            parse_file="$cache_file"
             ;;
     esac
 
+    local parse_rc=0
     case "$behavior" in
         classical)
             awk '
@@ -2030,6 +2208,9 @@ extract_ipv4_cidr_from_rule_provider_file() {
             }' "$parse_file"
             ;;
     esac
+    parse_rc=$?
+    [ -z "${cache_file:-}" ] || rm -f "$cache_file"
+    return "$parse_rc"
 }
 
 # Extract grouped entries from a classical provider payload containing rules
@@ -2037,6 +2218,10 @@ extract_ipv4_cidr_from_rule_provider_file() {
 # Output: cidr|network|ports
 extract_classical_and_ipcidr_entries() {
     local file="$1"
+    if [ "${2:-}" != "uncached" ] && command -v parsed_provider_cache >/dev/null 2>&1; then
+        parsed_provider_cache "$file" classical nested
+        return $?
+    fi
     [ -f "$file" ] || return 0
     local temp_dir rule_file rule_id operand_csv network ports current_file next_file single_file operand_count valid_rule cidr
     temp_dir="/tmp/clash/nested_and_$$"
@@ -2097,8 +2282,8 @@ extract_classical_and_ipcidr_entries() {
             else
                 printf '%s\n' "$cidr" > "$single_file"
                 intersect_ipv4_cidr_files "$current_file" "$single_file" > "$next_file" || {
-                    valid_rule="false"
-                    break
+                    rm -f "$rule_file" "$operands_file" "$current_file" "$next_file" "$single_file"
+                    return 1
                 }
                 mv -f "$next_file" "$current_file"
             fi
@@ -2358,19 +2543,19 @@ generate_fakeip_whitelist_auto() {
             continue
         fi
 
-        local entries
-        entries=$(extract_ipv4_cidr_from_rule_provider_file "$full_path" "$behavior")
-        local rc=$?
-        if [ "$rc" -ne 0 ]; then
+        local entries_file="/tmp/clash/clash_autowl_provider.$$"
+        if ! extract_ipv4_cidr_from_rule_provider_file "$full_path" "$behavior" > "$entries_file"; then
+            rm -f "$entries_file"
             msg "Auto fakeip whitelist: provider '$set_name' could not be parsed: $full_path (skipped)"
             printf '%s|%s|parse-error\n' "$set_name" "$full_path" >> "$tmp_incomplete"
             continue
         fi
-        if [ -n "$entries" ]; then
-            echo "$entries" >> "$tmp_out"
+        if [ -s "$entries_file" ]; then
+            cat "$entries_file" >> "$tmp_out"
             echo "$set_name" >> "$tmp_sources"
-            printf '%s|%s\n' "$set_name" "$(printf '%s\n' "$entries" | wc -l | xargs)" >> "$tmp_counts"
+            printf '%s|%s\n' "$set_name" "$(wc -l < "$entries_file" | xargs)" >> "$tmp_counts"
         fi
+        rm -f "$entries_file"
     done
 
     if [ -n "$inline_cidrs" ]; then
@@ -2851,7 +3036,7 @@ apply_nft_marking_mangle() {
         msg "Marking applied for all traffic (UDP mark: $udp_mark)"
     fi
     # Additionally mark traffic to fakeip whitelist IP-CIDR entries (whitelist/rule modes)
-    if is_ipcidr_whitelist_mode && [ -n "$FAKEIP_WHITELIST_IPS" ]; then
+    if is_ipcidr_whitelist_mode && [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
         nft add rule inet clash CLASH_MARK ip daddr @fakeip_whitelist meta l4proto tcp counter meta mark set "$MARK_TPROXY"
         nft add rule inet clash CLASH_MARK ip daddr @fakeip_whitelist meta l4proto udp counter meta mark set "$udp_mark"
         msg "Marking also applied for fakeip whitelist IP-CIDR nft set (UDP mark: $udp_mark, mode: $FAKE_IP_FILTER_MODE)"
@@ -3151,7 +3336,7 @@ apply_nft_output_rules() {
 
         # Additionally mark locally generated traffic to fakeip whitelist
         # IP-CIDR entries before root bypass.
-        if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -n "$FAKEIP_WHITELIST_IPS" ]; then
+        if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
             nft add rule inet clash output ip daddr @fakeip_whitelist meta mark 0 meta l4proto tcp counter meta mark set "$MARK_TPROXY"
             nft add rule inet clash output ip daddr @fakeip_whitelist meta l4proto udp counter meta mark set "$output_udp_mark"
             msg "OUTPUT: Marking also applied for fakeip whitelist IP-CIDR nft set"
@@ -3219,6 +3404,10 @@ rollback_nft_rules() {
 # =============================================================================
 
 apply_nft_rules() {
+    profile_run firewall_apply apply_nft_rules_impl "$@"
+}
+
+apply_nft_rules_impl() {
     local server_ips="$1"
     local fake_ip_range="$2"
     local fake_ip_filter_mode="$3"
@@ -3289,8 +3478,8 @@ apply_nft_rules() {
 
     # Create nft set for fakeip whitelist IP-CIDR entries (always created so rules can reference it)
     nft add set inet clash fakeip_whitelist '{ type ipv4_addr; flags interval; auto-merge; }'
-    if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-        echo "$FAKEIP_WHITELIST_IPS" | awk '
+    if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+        awk '
             BEGIN { count=0; line="" }
             {
                 if (count > 0) line = line ","
@@ -3302,8 +3491,8 @@ apply_nft_rules() {
                 }
             }
             END { if (count > 0) print "add element inet clash fakeip_whitelist { " line " }" }
-        ' | nft -f -
-        msg "Populated fakeip_whitelist nft set with $(echo "$FAKEIP_WHITELIST_IPS" | wc -l | xargs) entries (mode: $fake_ip_filter_mode)."
+        ' "$FAKEIP_WHITELIST_IPS_FILE" | nft -f -
+        msg "Populated fakeip_whitelist nft set with $(wc -l < "$FAKEIP_WHITELIST_IPS_FILE" | xargs) entries (mode: $fake_ip_filter_mode)."
     fi
 
     case "$MODE" in
@@ -3549,6 +3738,10 @@ teardown_routing_rules() {
 # Skipped entirely when AUTO_FAKEIP_WHITELIST is not "true" or when the current
 # fake-ip-filter-mode is neither whitelist nor rule.
 refresh_fakeip_whitelist_file() {
+    profile_run plain_list refresh_fakeip_whitelist_file_impl
+}
+
+refresh_fakeip_whitelist_file_impl() {
 	FAKEIP_REFRESH_STATE="ready"
 	FAKEIP_REFRESH_FALLBACK="false"
 	FAKEIP_REFRESH_ISSUES=""
@@ -3565,7 +3758,7 @@ refresh_fakeip_whitelist_file() {
     mkdir -p /opt/clash/lst/mrs_cache 2>/dev/null
     _fp_selected=$(get_fakeip_whitelist_provider_names)
     _fp_inline=$(extract_proxy_ip_cidr_rules)
-    _fp_providers=$(extract_rule_providers)
+    _fp_providers=$(profile_run config_parse extract_rule_providers)
     _fp_issues_file="/tmp/clash/fakeip_whitelist_source_issues.$$"
     mkdir -p /tmp/clash 2>/dev/null
     : > "$_fp_issues_file"
@@ -3585,6 +3778,8 @@ refresh_fakeip_whitelist_file() {
         [ -f "$_fp_full_path" ] || printf '%s|%s|missing\n' "$_fp_name" "$_fp_full_path" >> "$_fp_issues_file"
     done
     FAKEIP_REFRESH_ISSUES=$(cat "$_fp_issues_file" 2>/dev/null)
+    local scan_started
+    scan_started=$(profile_now_ms)
     _fp_current_digest=$(
         {
             printf 'generator=3\nmode=%s\nselected=%s\ninline-ipcidr=%s\n' \
@@ -3614,6 +3809,7 @@ refresh_fakeip_whitelist_file() {
             done
         } | md5sum | awk '{print $1}'
     )
+    [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'timing|provider_scan|%s|0\n' "$(($(profile_now_ms) - scan_started))" >> "$ASCLASH_PROFILE_FILE"
     _fp_saved_digest=""
     [ -f "$_fp_digest_file" ] && _fp_saved_digest=$(cat "$_fp_digest_file" 2>/dev/null)
     existing_auto_count=0
@@ -3637,6 +3833,7 @@ refresh_fakeip_whitelist_file() {
        && [ -n "$_fp_summary_count" ] \
        && [ "$_fp_summary_count" = "${existing_auto_count:-0}" ]; then
         msg "Auto fakeip whitelist sources unchanged, skipping regeneration"
+        [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'cache|plain_list|hit\n' >> "$ASCLASH_PROFILE_FILE"
         if [ -s "$_fp_issues_file" ]; then
             if [ "${existing_auto_count:-0}" -gt 0 ]; then
                 FAKEIP_REFRESH_STATE="fallback"
@@ -3652,7 +3849,8 @@ refresh_fakeip_whitelist_file() {
     # Run generate_fakeip_whitelist_auto with stdout redirected — NOT via
     # command substitution. The latter would fork a subshell and discard
     # AUTO_FAKEIP_SOURCES, breaking the # Sources: header and log lines.
-    local auto_entries tmp_auto summary_backup
+    [ -z "$ASCLASH_PROFILE_FILE" ] || printf 'cache|plain_list|miss\n' >> "$ASCLASH_PROFILE_FILE"
+    local tmp_auto summary_backup
     summary_backup="/tmp/clash/fakeip_whitelist_summary_backup.$$"
     tmp_auto="/tmp/clash/clash_autowl_stdout.$$"
     mkdir -p /tmp/clash
@@ -3660,9 +3858,14 @@ refresh_fakeip_whitelist_file() {
         cp -p "$FAKEIP_WHITELIST_SUMMARY_FILE" "$summary_backup" 2>/dev/null || rm -f "$summary_backup"
     fi
     : > "$tmp_auto"
-    generate_fakeip_whitelist_auto > "$tmp_auto"
-    auto_entries=$(cat "$tmp_auto" 2>/dev/null)
-    rm -f "$tmp_auto"
+    if ! generate_fakeip_whitelist_auto > "$tmp_auto"; then
+        rm -f "$tmp_auto" "$_fp_issues_file"
+        if [ -f "$summary_backup" ]; then
+            mv -f "$summary_backup" "$FAKEIP_WHITELIST_SUMMARY_FILE"
+        fi
+        FAKEIP_REFRESH_STATE="error"
+        return 1
+    fi
     FAKEIP_REFRESH_ISSUES="$AUTO_FAKEIP_ISSUES"
     _fp_only_missing=$(printf '%s\n' "$AUTO_FAKEIP_ISSUES" | awk -F'|' 'NF && $3 != "missing" { bad=1 } END { print bad ? "false" : "true" }')
     rm -f "$_fp_issues_file"
@@ -3680,6 +3883,7 @@ refresh_fakeip_whitelist_file() {
         fi
         FAKEIP_REFRESH_STATE="fallback"
         FAKEIP_REFRESH_FALLBACK="true"
+        rm -f "$tmp_auto"
         return 0
     fi
     rm -f "$summary_backup"
@@ -3701,8 +3905,8 @@ refresh_fakeip_whitelist_file() {
     fi
 
     local count=0
-    if [ -n "$auto_entries" ]; then
-        count=$(echo "$auto_entries" | wc -l | xargs)
+    if [ -s "$tmp_auto" ]; then
+        count=$(wc -l < "$tmp_auto" | xargs)
     fi
     # Build the candidate on tmpfs — avoids writing a full .tmp next to the
     # whitelist on overlay every run when content ends up unchanged (cmp below).
@@ -3725,11 +3929,12 @@ refresh_fakeip_whitelist_file() {
         else
             printf '# Sources: (none — no matching rule-providers contained IPv4 CIDRs)\n'
         fi
-        if [ -n "$auto_entries" ]; then
-            printf '%s\n' "$auto_entries"
+        if [ -s "$tmp_auto" ]; then
+            cat "$tmp_auto"
         fi
         printf '%s\n' "$FAKEIP_AUTO_END"
     } > "$tmp_file"
+    rm -f "$tmp_auto"
 
     # Skip the rewrite when the file content is byte-identical to what we would
     # produce — avoids spurious mtime churn on every start/update.
@@ -3766,7 +3971,7 @@ update_fakeip_whitelist_sets() {
     load_all_settings_once
 
     local fake_ip_config fake_ip_range fake_ip_filter_mode
-    fake_ip_config=$(extract_fake_ip_config) || {
+    fake_ip_config=$(profile_run config_parse extract_fake_ip_config) || {
         ASCLASH_FAKEIP_STATE="failed"
         ASCLASH_GROUPED_STATE="failed"
         set_list_progress "failed"
@@ -3797,11 +4002,15 @@ update_fakeip_whitelist_sets() {
     # sources. Propagate the locally extracted value so the cron path behaves
     # identically to the start() path.
     FAKE_IP_FILTER_MODE="$fake_ip_filter_mode"
-    refresh_fakeip_whitelist_file
+    refresh_fakeip_whitelist_file || return 1
     ASCLASH_FAKEIP_ISSUES="$FAKEIP_REFRESH_ISSUES"
     ASCLASH_FAKEIP_FALLBACK="$FAKEIP_REFRESH_FALLBACK"
     ASCLASH_FAKEIP_STATE="$FAKEIP_REFRESH_STATE"
-    FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
+    local whitelist_tmp="${FAKEIP_WHITELIST_IPS_FILE}.tmp.$$"
+    if ! read_fakeip_whitelist_entries > "$whitelist_tmp" || ! mv -f "$whitelist_tmp" "$FAKEIP_WHITELIST_IPS_FILE"; then
+        rm -f "$whitelist_tmp"
+        return 1
+    fi
     # The generator writes only files and logger summaries.  Keep any
     # accidental stdout from nested provider converters out of SSH output.
     generate_grouped_port_sources >/dev/null || {
@@ -3826,12 +4035,12 @@ update_fakeip_whitelist_sets() {
     # blacklist mode above and lost on reboot (full refresh — correct).
     mkdir -p /tmp/clash 2>/dev/null
     local current_digest prev_digest
-    if [ -z "$FAKEIP_WHITELIST_IPS" ]; then
+    if [ ! -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
         current_digest="empty"
     elif command -v sha256sum >/dev/null 2>&1; then
-        current_digest=$(printf '%s\n' "$FAKEIP_WHITELIST_IPS" | LC_ALL=C sort -u | sha256sum | awk '{print $1}')
+        current_digest=$(LC_ALL=C sort -u "$FAKEIP_WHITELIST_IPS_FILE" | sha256sum | awk '{print $1}')
     else
-        current_digest=$(printf '%s\n' "$FAKEIP_WHITELIST_IPS" | LC_ALL=C sort -u | md5sum | awk '{print $1}')
+        current_digest=$(LC_ALL=C sort -u "$FAKEIP_WHITELIST_IPS_FILE" | md5sum | awk '{print $1}')
     fi
     prev_digest=""
     [ -f "$FAKEIP_WHITELIST_DIGEST_FILE" ] && prev_digest=$(tr -d '\r\n' < "$FAKEIP_WHITELIST_DIGEST_FILE")
@@ -3851,8 +4060,8 @@ update_fakeip_whitelist_sets() {
             local nft_batch="/tmp/clash/fakeip_whitelist_nft.$$"
             {
                 printf 'flush set inet clash fakeip_whitelist\n'
-                if [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-                    printf '%s\n' "$FAKEIP_WHITELIST_IPS" | awk '
+                if [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+                    awk '
                         BEGIN { count=0; line="" }
                         {
                             if (count > 0) line = line ","
@@ -3864,13 +4073,13 @@ update_fakeip_whitelist_sets() {
                             }
                         }
                         END { if (count > 0) print "add element inet clash fakeip_whitelist { " line " }" }
-                    '
+                    ' "$FAKEIP_WHITELIST_IPS_FILE"
                 fi
             } > "$nft_batch"
-            if nft -f "$nft_batch"; then
+            if profile_run plain_nft nft -f "$nft_batch"; then
                 rm -f "$nft_batch"
-                if [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-                    msg "Updated nft fakeip_whitelist set: $(echo "$FAKEIP_WHITELIST_IPS" | wc -l | xargs) entries"
+                if [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+                    msg "Updated nft fakeip_whitelist set: $(wc -l < "$FAKEIP_WHITELIST_IPS_FILE" | xargs) entries"
                 else
                     msg "Fakeip whitelist file is empty, nft set cleared"
                 fi
@@ -4116,7 +4325,7 @@ start_unlocked() {
 
     local server_ips fake_ip_config fake_ip_range fake_ip_filter_mode
     server_ips=$(extract_server_ips)
-    fake_ip_config=$(extract_fake_ip_config) || {
+    fake_ip_config=$(profile_run config_parse extract_fake_ip_config) || {
         warn "Refusing to apply firewall rules because Fake-IP settings could not be parsed"
         set_list_progress "failed"
         return 1
@@ -4139,16 +4348,20 @@ start_unlocked() {
         # be absent by design. Keep the last generated block and defer noisy
         # per-provider missing-file messages until the post-start readiness check.
         AUTO_FAKEIP_DEFER_MISSING="true"
-        refresh_fakeip_whitelist_file
+        refresh_fakeip_whitelist_file || return 1
         AUTO_FAKEIP_DEFER_MISSING="false"
-        FAKEIP_WHITELIST_IPS=$(read_fakeip_whitelist_entries)
+        local whitelist_tmp="${FAKEIP_WHITELIST_IPS_FILE}.tmp.$$"
+        if ! read_fakeip_whitelist_entries > "$whitelist_tmp" || ! mv -f "$whitelist_tmp" "$FAKEIP_WHITELIST_IPS_FILE"; then
+            rm -f "$whitelist_tmp"
+            return 1
+        fi
         generate_grouped_port_sources >/dev/null || {
             warn "Grouped IP-CIDR rule generation failed; refusing to start with an incomplete firewall policy"
             set_list_progress "failed"
             return 1
         }
-        if [ -n "$FAKEIP_WHITELIST_IPS" ]; then
-            msg "Loaded fakeip whitelist: $(echo "$FAKEIP_WHITELIST_IPS" | wc -l | xargs) IP/CIDR entries from $FAKEIP_WHITELIST_FILE (mode: $FAKE_IP_FILTER_MODE)"
+        if [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+            msg "Loaded fakeip whitelist: $(wc -l < "$FAKEIP_WHITELIST_IPS_FILE" | xargs) IP/CIDR entries from $FAKEIP_WHITELIST_FILE (mode: $FAKE_IP_FILTER_MODE)"
         else
             msg "Fakeip whitelist file is empty or not found at $FAKEIP_WHITELIST_FILE"
         fi
@@ -4235,6 +4448,9 @@ UCI_EOF
             msg "Registered fw4 include hook: /var/etc/asclash.include"
             ;;
     esac
+    if [ "$ASCLASH_LIST_CYCLE_ACTIVE" != "true" ]; then
+        write_list_diagnostics || warn "Could not save startup timing diagnostics"
+    fi
 }
 
 stop_unlocked() {

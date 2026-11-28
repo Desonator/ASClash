@@ -122,6 +122,10 @@ ASClash detects the router architecture, compares installed and available versio
 - **Local rule sets** — manage user rule files under `/opt/clash/lst`.
 - **Log** — service and core messages.
 
+The Diagnostics “Processing performance” section reports the last cycle: configuration parsing, provider scanning/parsing, both IP-CIDR list generation stages, firewall application and cache hits/misses. Times are milliseconds with approximately 10 ms resolution. Nested stages overlap and must not be added together; zero means below clock resolution. These are processing times, not DNS-request or network latency measurements.
+
+Parsed providers are cached in RAM by content, behavior, format and parser version (up to 64 results and 16 MiB). Successful empty results are cached; failed parses are never published. Large intermediate lists are streamed through files in `/tmp`. These optimizations do not change routing order or DIRECT/Fake-IP behavior.
+
 ## Traffic processing and IP-CIDR lists
 
 ASClash installs firewall and policy-routing rules for selected interfaces. Reserved/local networks, proxy-server addresses, service ports and already-marked traffic are excluded to reduce routing loops. The firewall decides which connections reach Mihomo; Mihomo's configuration and rule order decide the final route/action for those connections.

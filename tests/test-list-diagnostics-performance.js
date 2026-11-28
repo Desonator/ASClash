@@ -1,0 +1,14 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const source = fs.readFileSync(path.join(__dirname, '../luci-app-asclash/rootfs/www/luci-static/resources/view/asclash/diagnostics.js'), 'utf8');
+const start = source.indexOf('function parseListDiagnostics(');
+const end = source.indexOf('\nfunction providerIssueNote(', start);
+const parse = new Function(source.slice(start, end) + '\nreturn parseListDiagnostics;')();
+const report = parse('cycle|complete|123|update\ntiming|plain_list|110|2|1\ncache|provider|hit|5\ncache|provider|miss|2\nfakeip|applied|false\n');
+assert.deepStrictEqual(report.performance.timings, [{ stage: 'plain_list', ms: 110, calls: 2, errors: 1 }]);
+assert.deepStrictEqual(report.performance.cache, [{ stage: 'provider', outcome: 'hit', count: 5 }, { stage: 'provider', outcome: 'miss', count: 2 }]);
+assert.equal(report.fakeip.state, 'applied');
+assert.deepStrictEqual(parse('fakeip|applied|false').performance, { timings: [], cache: [] });
+console.log('Performance diagnostics and legacy reports parsed correctly.');
