@@ -26,6 +26,13 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Project updates | The Status tab can check for and install the latest ASClash package without showing release notes. This action does not update the Mihomo core. |
 | Service operation | Status notifications report service restarts and rule-list generation/application; the configuration page includes service controls and a dashboard link. |
 
+### Using the additions
+
+1. In **Settings**, select interfaces and network mode; optionally enable forced DNS and manage DIRECT for devices with permanent DHCP reservations.
+2. Use **Status** to check the service, IP-CIDR and grouped AND list generation, and available updates. Smart groups require a core exposing the corresponding API.
+3. Use **Diagnostics** to check DNS, firewall, routes and skipped providers. A green list status checks component presence and source digests; it does not compare every kernel set element with the files.
+4. Restart the service after changing DNS or network mode. Routine provider refreshes update IP-CIDR lists without rebuilding the entire firewall table.
+
 See [Traffic processing and IP-CIDR lists](#traffic-processing-and-ip-cidr-lists) for behavior and limitations.
 
 ## Requirements and compatibility

@@ -4118,7 +4118,7 @@ update_fakeip_whitelist_sets() {
     fi
     load_all_settings_once
 
-    local fake_ip_config fake_ip_range fake_ip_filter_mode
+    local fake_ip_config fake_ip_range fake_ip_filter_mode=""
     fake_ip_config=$(profile_run config_parse extract_fake_ip_config) || {
         ASCLASH_FAKEIP_STATE="failed"
         ASCLASH_GROUPED_STATE="failed"
@@ -4135,13 +4135,10 @@ update_fakeip_whitelist_sets() {
         ASCLASH_FAKEIP_STATE="disabled"
         ASCLASH_FAKEIP_ISSUES=""
         ASCLASH_GROUPED_STATE="disabled"
-        msg "fake-ip-filter-mode is '${fake_ip_filter_mode:-blacklist}', not 'whitelist'/'rule' — clearing fakeip sets if they exist"
-        set_list_progress "applying"
-        rm -f "$FAKEIP_WHITELIST_DIGEST_FILE" 2>/dev/null
-        if hash nft 2>/dev/null && nft list set inet clash fakeip_whitelist >/dev/null 2>&1; then
-            nft flush set inet clash fakeip_whitelist 2>/dev/null
-            msg "nft fakeip_whitelist set cleared"
-        fi
+        # The running table may still use the previous DNS mode. Clearing one
+        # set here would mix policies; a service restart rebuilds the complete
+        # table for the new configuration.
+        msg "Fake-IP whitelist updates are disabled for mode '${fake_ip_filter_mode:-blacklist}'; restart the service after changing DNS mode"
         return 0
     fi
 
