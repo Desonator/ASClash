@@ -578,7 +578,7 @@ return view.extend({
     },
 
     render: function(data) {
-        const { isWhitelistMode, whitelistSummary, groupedSummary, configContent, whitelistFile, smartGroupNames, showSmartWeights = true,
+        let { isWhitelistMode, whitelistSummary, groupedSummary, configContent, whitelistFile, smartGroupNames, showSmartWeights = true,
             whitelistSourceDigest = '', groupedSourceDigest = '' } = data || {
             isWhitelistMode: false, whitelistSummary: '', groupedSummary: '', configContent: '', whitelistFile: '', smartGroupNames: null, showSmartWeights: true,
             whitelistSourceDigest: '', groupedSourceDigest: ''
@@ -657,6 +657,7 @@ return view.extend({
             card.insertBefore(faq, card.firstChild);
         }
 
+        function buildFirewallSections() {
         const whitelistSections = [];
         if (isWhitelistMode) {
             const whitelistStats = getWhitelistSummaryData(whitelistSummary, whitelistFile);
@@ -792,20 +793,23 @@ return view.extend({
             whitelistSections.push(groupedBlock);
 
         }
+        return whitelistSections;
+        }
 
+        const firewallContainer = E('div', {}, buildFirewallSections());
         const root = E('div', {}, [
             style,
             createASClashUpdateSection(),
             createSmartWeightsSection(smartGroupNames, configContent, isRussian, showSmartWeights),
             view_asclash_kernel.createKernelManagementSection(),
-            ...whitelistSections
+            firewallContainer
         ]);
 
         // Provider-derived summaries can be regenerated shortly after Mihomo
         // starts because rule-provider files live in tmpfs. Refresh this view
         // when their persisted summaries/digests or config actually change.
         let snapshot = JSON.stringify([configContent, whitelistSummary, groupedSummary,
-            whitelistSourceDigest, groupedSourceDigest]);
+            whitelistFile, whitelistSourceDigest, groupedSourceDigest]);
         let statusRefreshRunning = false;
         let statusRefreshTimer;
         statusRefreshTimer = setInterval(async function() {
@@ -823,16 +827,34 @@ return view.extend({
                     L.resolveDefault(fs.read('/opt/clash/lst/mrs_cache/.whitelist_src_digest'), ''),
                     L.resolveDefault(fs.read('/tmp/clash/fakeip_port_groups.digest'), '')
                 ]);
-                const nextSnapshot = JSON.stringify(current);
-                if (nextSnapshot !== snapshot) {
+                if (current[0] !== configContent) {
                     clearInterval(statusRefreshTimer);
                     window.location.reload();
                     return;
                 }
+
+                let currentWhitelistFile = whitelistFile;
+                if (current[3] !== whitelistSourceDigest)
+                    currentWhitelistFile = await L.resolveDefault(fs.read(`${rulesetPath}${FAKEIP_WHITELIST_FILENAME}`), '');
+
+                const nextValues = [current[0], current[1], current[2], currentWhitelistFile, current[3], current[4]];
+                const nextSnapshot = JSON.stringify(nextValues);
+                if (nextSnapshot !== snapshot) {
+                    [, whitelistSummary, groupedSummary, whitelistFile, whitelistSourceDigest, groupedSourceDigest] = nextValues;
+                    const expandedCards = Array.from(firewallContainer.querySelectorAll('.asclash-firewall-card')).map(card => {
+                        const details = card.querySelector('.asclash-faq');
+                        return !!(details && details.open);
+                    });
+                    firewallContainer.replaceChildren(...buildFirewallSections());
+                    firewallContainer.querySelectorAll('.asclash-firewall-card .asclash-faq').forEach((details, index) => {
+                        details.open = expandedCards[index] || false;
+                    });
+                    snapshot = nextSnapshot;
+                }
             } finally {
                 statusRefreshRunning = false;
             }
-        }, 15000);
+        }, 30000);
 
         return root;
     },

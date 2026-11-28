@@ -285,36 +285,11 @@ function createKernelManagementSection() {
 	container.appendChild(actions);
 
 	let badgesUpdating = false;
-	let previousRuntimeState = null;
-	let candidateRuntimeState = null;
-	let candidateRuntimeSamples = 0;
 	async function refreshRuntimeState() {
 		if (badgesUpdating || !container.isConnected) return;
 		badgesUpdating = true;
 		try {
-			const current = await updateRuntimeBadges(serviceBadge, kernelBadge);
-			const signature = `${current.serviceRunning ? 1 : 0}:${current.kernelRunning ? 1 : 0}`;
-			if (previousRuntimeState === null) {
-				previousRuntimeState = signature;
-			} else if (signature === previousRuntimeState) {
-				candidateRuntimeState = null;
-				candidateRuntimeSamples = 0;
-			} else {
-				if (candidateRuntimeState !== signature) {
-					candidateRuntimeState = signature;
-					candidateRuntimeSamples = 1;
-				} else {
-					candidateRuntimeSamples++;
-				}
-				if (candidateRuntimeSamples >= 2) {
-					const [oldService, oldKernel] = previousRuntimeState.split(':').map(value => value === '1');
-					previousRuntimeState = signature;
-					candidateRuntimeState = null;
-					candidateRuntimeSamples = 0;
-					if ((!oldService && current.serviceRunning) || (!oldKernel && current.kernelRunning))
-						window.location.reload();
-				}
-			}
+			await updateRuntimeBadges(serviceBadge, kernelBadge);
 		} finally {
 			badgesUpdating = false;
 		}
