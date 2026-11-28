@@ -1308,6 +1308,21 @@ clear_grouped_port_artifacts() {
     : > "$GROUPED_FAKEIP_SUMMARY_FILE"
 }
 
+# Keep only provider definitions referenced by traffic rules. Hashing every
+# configured provider on each refresh needlessly rebuilds grouped nft state
+# when an unrelated provider file changes.
+select_rule_provider_rows() {
+    local provider_rows="$1" selected_names="$2"
+    printf '%s\n' "$provider_rows" | awk -F'|' -v selected="$selected_names" '
+        BEGIN {
+            count = split(selected, names, "\n")
+            for (i = 1; i <= count; i++)
+                if (names[i] != "") wanted[names[i]] = 1
+        }
+        $1 in wanted { print }
+    '
+}
+
 # Build grouped CIDR sources for complex port rules. This stage deliberately
 # does not touch nftables: it collects CIDRs per condition, then coalesces
 # byte-identical sets shared by different network/port rules. Exact CIDRs
@@ -1321,7 +1336,7 @@ generate_grouped_port_sources() {
     [ -f "$CONFIG_FILE" ] || return 1
     mkdir -p /tmp/clash
 
-    local rules providers base_dir auto_file metadata rule provider network ports action ui_summary source_map ui_rows provider_ui_map provider_ui_counts
+    local rules providers referenced_providers base_dir auto_file metadata rule provider network ports action ui_summary source_map ui_rows provider_ui_map provider_ui_counts
     rules="$(extract_grouped_port_rules)"
     providers="$(extract_rule_providers)"
     local rule_set_names classical_candidates
@@ -1331,6 +1346,7 @@ generate_grouped_port_sources() {
         clear_grouped_port_artifacts
         return 0
     fi
+    referenced_providers=$(select_rule_provider_rows "$providers" "$classical_candidates")
     base_dir="$(get_providers_base_dir)"
     local digest_input grouped_digest saved_digest
     digest_input=$(printf 'generator=4\n%s\n%s\n%s\nlimits=%s|%s\n' \
@@ -1344,7 +1360,7 @@ generate_grouped_port_sources() {
         esac
         [ -f "$_full" ] && digest_input="$digest_input\n$_provider|$_behavior|$_type|$_path|$_full:$(md5sum "$_full" 2>/dev/null | awk '{print $1}')"
     done <<EOF
-$providers
+$referenced_providers
 EOF
     grouped_digest=$(printf '%b\n' "$digest_input" | md5sum | awk '{print $1}')
     saved_digest=""
