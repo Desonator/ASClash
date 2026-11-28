@@ -12,4 +12,13 @@ assert.deepStrictEqual(report.performance.cache, [{ stage: 'provider', outcome: 
 assert.equal(report.fakeip.state, 'applied');
 assert.deepStrictEqual(parse('subscription|servers|12|3\nsubscription|dns|2|1').performance.subscription, { servers: { total: 12, unique: 3 }, dns: { total: 2, unique: 1 } });
 assert.deepStrictEqual(parse('fakeip|applied|false').performance, { timings: [], cache: [], subscription: {} });
+const groupedStart = source.indexOf('function groupedRulesPresent(');
+const groupedEnd = source.indexOf('\nreturn view.extend(', groupedStart);
+const groupedRulesPresent = new Function(source.slice(groupedStart, groupedEnd) + '\nreturn groupedRulesPresent;')();
+const mark = output => ({ ok: true, output });
+assert(groupedRulesPresent(mark('ip daddr @fp_123abc tcp dport 443'), null));
+assert(groupedRulesPresent(mark('jump ASCLASH_GROUPED'), mark('ip daddr @fp_123abc udp dport 53')));
+assert(!groupedRulesPresent(mark('jump ASCLASH_GROUPED'), mark('')));
+assert(!groupedRulesPresent(mark(''), mark('ip daddr @fp_123abc')));
+assert(!groupedRulesPresent(mark('jump ASCLASH_GROUPED'), { ok: false, output: 'ip daddr @fp_123abc' }));
 console.log('Performance diagnostics and legacy reports parsed correctly.');

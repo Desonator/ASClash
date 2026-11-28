@@ -468,10 +468,18 @@ function listSection(title, state, statusText, metrics, note) {
 	return E('div', { 'style': 'padding:8px 10px;border:1px solid rgba(127,127,127,.25);border-radius:5px;text-align:left;' }, children);
 }
 
+function groupedRulesPresent(markChain, groupedChain) {
+	if (!markChain.ok)
+		return false;
+	if (/@fp_[a-f0-9]+/.test(markChain.output))
+		return true;
+	return /\bjump\s+ASCLASH_GROUPED\b/.test(markChain.output) && !!groupedChain && groupedChain.ok && /@fp_[a-f0-9]+/.test(groupedChain.output);
+}
+
 return view.extend({
 	load: async function() {
 		const paths = Object.values(FILES);
-		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelProcess, whitelistSet, markChain, dnsRedirect] = await Promise.all([
+		const [fileValues, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelProcess, whitelistSet, markChain, groupedChain, dnsRedirect] = await Promise.all([
 			Promise.all(paths.map(read)),
 			command('/usr/sbin/nft', ['list', 'chains', 'inet']),
 			command('/sbin/ip', ['rule', 'show']),
@@ -483,15 +491,16 @@ return view.extend({
 			checkKernelRunning(),
 			command('/usr/sbin/nft', ['list', 'set', 'inet', 'clash', 'fakeip_whitelist']),
 			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'CLASH_MARK']),
+			command('/usr/sbin/nft', ['list', 'chain', 'inet', 'clash', 'ASCLASH_GROUPED']),
 			command('/usr/sbin/nft', ['-a', 'list', 'chain', 'inet', 'clash', 'dns_redirect'])
 		]);
 		const files = Object.fromEntries(paths.map((path, index) => [path, fileValues[index]]));
 		const api = await checkMihomoApi();
-		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, dnsRedirect, api, checkedAt: new Date().toLocaleString() };
+		return { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning: kernelProcess.ok, whitelistSet, markChain, groupedChain, dnsRedirect, api, checkedAt: new Date().toLocaleString() };
 	},
 
 	render: function(data, skipAutoRefresh) {
-		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, dnsRedirect, api, checkedAt } = data;
+		const { files, nft, rules, route100, route101, tunLink, logread, serviceRunning, kernelRunning, whitelistSet, markChain, groupedChain, dnsRedirect, api, checkedAt } = data;
 		const whitelist = parseWhitelistSummary(files[FILES.whitelist]);
 		const grouped = parseGroupedSummary(files[FILES.grouped]);
 		const progressFields = String(files[FILES.listProgress] || '').trim().split('|');
@@ -557,7 +566,7 @@ return view.extend({
 		]);
 
 		const whitelistActive = whitelist.total === 0 || whitelistSet.ok;
-		const groupedActive = grouped.total === 0 || (!!groupedSourceDigest && groupedSourceDigest === groupedAppliedDigest && markChain.ok && /@fp_[a-f0-9]+/.test(markChain.output));
+		const groupedActive = grouped.total === 0 || (!!groupedSourceDigest && groupedSourceDigest === groupedAppliedDigest && groupedRulesPresent(markChain, groupedChain));
 		const fakeState = listDiagnostics.fakeip.state;
 		const groupedState = listDiagnostics.grouped.state;
 		const listCycle = listDiagnostics.cycle.phase;
