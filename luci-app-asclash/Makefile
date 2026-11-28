@@ -5,9 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-asclash
-PKG_VERSION:=4.8.5.6
+PKG_VERSION:=4.8.5.8
 PKG_RELEASE:=1
 PKG_MAINTAINER:=Desonator <https://github.com/Desonator>
+
+# rpcd's rc.list only exposes init scripts owned by root:root.
+PKG_FILE_MODES:=/etc/init.d/clash:root:root:0755
 
 LUCI_TITLE:=ASClash LuCI Support
 LUCI_DEPENDS:=+luci-base +coreutils-base64 +firewall4 +kmod-nft-tproxy +kmod-tun +curl
@@ -112,6 +115,15 @@ endef
 
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
+if [ -n "$$IPKG_INSTROOT" ]; then
+	INIT_SCRIPT="$$IPKG_INSTROOT/etc/init.d/clash"
+else
+	INIT_SCRIPT="/etc/init.d/clash"
+fi
+if [ -f "$$INIT_SCRIPT" ]; then
+	chown 0:0 "$$INIT_SCRIPT" || exit 1
+	chmod 0755 "$$INIT_SCRIPT" || exit 1
+fi
 if [ -f /opt/clash/.config.yaml.upgrade.bak ]; then
 	mv /opt/clash/.config.yaml.upgrade.bak /opt/clash/config.yaml
 	FIRST_INSTALL=0
