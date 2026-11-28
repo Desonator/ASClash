@@ -16,6 +16,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | --- | --- |
 | Diagnostics | A separate page checks service and core state, local Mihomo API availability, and consistency between the configured network mode and nftables, `ip rule`, routes and the TUN interface. Checks are read-only. |
 | Rule-list status | Shows the latest list-generation cycle, states and counters for plain IP-CIDR and grouped AND lists, parser/provider issues, and whether the previous list was retained while provider files were unavailable. Historical log messages remain separately expandable. |
+| Rule refresh | Plain and grouped lists are applied in one nftables transaction; caching avoids repeated parsing, and failed subscription-address updates are retried on the next cycle. |
 | Fake-IP IP-CIDR | Builds an IPv4 list from referenced rule providers and supported inline rules. LuCI shows per-provider counts and an FAQ; manual entries outside the generated block are preserved. |
 | Forced DNS | Redirects client IPv4 TCP/UDP requests to router port 53 and reports active rules and conntrack-flow counters in Diagnostics. It follows interface-processing scope and exempts DIRECT sources. |
 | Grouped AND rules | Supported `AND` rules are translated into IPv4 nftables sets and compact protocol/port rules. Matching sources/sets can be reused while TCP/UDP and port conditions stay separate. |

@@ -26,6 +26,7 @@ for FAKE_IP_FILTER_MODE in whitelist rule; do
     grep -q 'ip daddr @fakeip_whitelist meta l4proto udp.*0x0003' "$TEST_DIR/calls"
     : > "$TEST_DIR/calls"
     apply_nft_output_rules '' '' "$FAKE_IP_FILTER_MODE" 198.18.0.0/15
+    grep -q 'output ip daddr @proxy_servers return' "$TEST_DIR/calls"
     grep -q 'output ip daddr @fakeip_whitelist meta mark 0 meta l4proto tcp.*0x0001' "$TEST_DIR/calls"
     grep -q 'output ip daddr @fakeip_whitelist meta l4proto udp.*0x0003' "$TEST_DIR/calls"
 done
@@ -34,4 +35,5 @@ FAKE_IP_FILTER_MODE=blacklist
 apply_nft_marking_mangle 198.18.0.0/15
 ! grep -q '@fakeip_whitelist' "$TEST_DIR/calls"
 awk '/^apply_nft_rules_impl\(\) \{/ { active=1 } active && /    apply_nft_src_ip_cidr_policy$/ { policy=NR } active && /nft add rule inet clash CLASH_MARK jump ASCLASH_GROUPED/ { grouped=NR; exit } END { exit !(policy && grouped && policy < grouped) }' "$SCRIPT"
+awk '/^apply_nft_rules_impl\(\) \{/ { active=1 } active && /    apply_nft_server_exclusions_mangle$/ { server=NR } active && /    apply_nft_src_ip_cidr_policy$/ { exit } END { exit !server }' "$SCRIPT"
 printf '%s\n' 'Empty whitelist startup and source policy ordering tests passed.'

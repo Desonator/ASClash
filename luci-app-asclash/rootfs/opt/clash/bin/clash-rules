@@ -3379,12 +3379,12 @@ apply_nft_output_rules() {
             nft add rule inet clash output ip saddr "$network" return
         done
 
-        # Apply server exclusions if provided
-        if [ -n "$server_ips" ]; then
-            nft add rule inet clash output ip saddr @proxy_servers return
-            nft add rule inet clash output ip daddr @proxy_servers return
-        fi
     fi
+
+    # The set may be populated after startup by the subscription refresh.
+    # Always reference it, including in whitelist mode, to prevent loops.
+    nft add rule inet clash output ip saddr @proxy_servers return
+    nft add rule inet clash output ip daddr @proxy_servers return
 
     # In MIXED mode router-originated UDP must use the TUN mark (0x0003 → table 101 → clash-tun)
     local output_udp_mark="$MARK_TPROXY"
@@ -3593,11 +3593,13 @@ apply_nft_rules_impl() {
     if [ "$fake_ip_filter_mode" != "whitelist" ]; then
         apply_nft_dhcp_mangle
         apply_nft_reserved_networks_mangle
-        apply_nft_server_exclusions_mangle
         msg "Full exclusion rules applied"
     else
         msg "Minimal exclusion rules applied (fake-ip-filter-mode: whitelist - only system protection)"
     fi
+    # Proxy addresses can overlap generated CIDRs, including in whitelist
+    # mode, and the set is often populated only after the core has started.
+    apply_nft_server_exclusions_mangle
 
     # Source DIRECT/REJECT policy must run before grouped destinations can mark
     # traffic. A return from a later rule does not clear an existing mark.
@@ -3675,9 +3677,22 @@ update_rules() {
         new_ips=$(cat "$SUBSCRIPTION_CACHE_FILE")
     fi
 
-    if [ "$old_ips" = "$new_ips" ]; then
+    # The download cache is updated before the kernel set. A failed nft
+    # transaction must be retried even when the next download is unchanged.
+    local pending_file="${SUBSCRIPTION_CACHE_FILE}.nft-pending"
+    if [ "$old_ips" = "$new_ips" ] && [ ! -f "$pending_file" ]; then
         msg "Subscription IPs unchanged, no update needed."
         return 0
+    fi
+
+    if ! : > "$pending_file"; then
+        # Keep the old cache as the comparison baseline if a retry marker
+        # cannot be written; the firewall has not been modified yet.
+        printf '%s\n' "$old_ips" > "${SUBSCRIPTION_CACHE_FILE}.rollback.$$" && \
+            mv -f "${SUBSCRIPTION_CACHE_FILE}.rollback.$$" "$SUBSCRIPTION_CACHE_FILE" || \
+            warn "Could not restore the subscription cache after a marker failure"
+        warn "Cannot record pending subscription firewall update"
+        return 1
     fi
 
     msg "Subscription IPs have changed. Applying delta update."
@@ -3715,6 +3730,7 @@ update_rules() {
     } > "$nft_batch"
     if nft -c -f "$nft_batch" && nft -f "$nft_batch"; then
         rm -f "$nft_batch"
+        rm -f "$pending_file"
         msg "Updated proxy_servers set with $(printf '%s\n' "$unique_ips" | grep -c . | xargs) current server IPs."
     else
         rm -f "$nft_batch"
