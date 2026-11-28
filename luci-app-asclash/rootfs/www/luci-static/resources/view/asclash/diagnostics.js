@@ -627,7 +627,7 @@ return view.extend({
 						listDiagnostics.performance.subscription.servers ? E('div', {}, _('Subscription servers: %d · Unique addresses: %d').format(listDiagnostics.performance.subscription.servers.total, listDiagnostics.performance.subscription.servers.unique)) : null,
 						listDiagnostics.performance.subscription.dns ? E('div', {}, _('Subscription DNS lookups: %d · Failed: %d').format(listDiagnostics.performance.subscription.dns.total, listDiagnostics.performance.subscription.dns.unique)) : null,
 						listDiagnostics.performance.subscription.provider_errors && listDiagnostics.performance.subscription.provider_errors.total ? E('div', {}, _('Subscription provider read failures: %d').format(listDiagnostics.performance.subscription.provider_errors.total)) : null
-					])
+					].filter(Boolean))
 			])
 		]);
 
