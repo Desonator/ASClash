@@ -1793,13 +1793,18 @@ EOF
 # Apply the grouped port sources as native IPv4 nft sets plus dport rules.
 # This avoids the memory-heavy ipv4_addr . inet_service concatenation set.
 apply_grouped_port_nft_rules() {
-    profile_run grouped_nft apply_grouped_port_nft_rules_impl
+    profile_run grouped_nft apply_grouped_port_nft_rules_impl "$@"
 }
 
 apply_grouped_port_nft_rules_impl() {
+    local prepare_batch="${1:-}"
+    if [ -n "$prepare_batch" ]; then
+        : > "$prepare_batch" || return 1
+        [ "$GROUPED_FAKEIP_PORT_RULES_DRY_RUN" != "true" ] || return 0
+    fi
     [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ] || return 0
     if [ ! -s /tmp/clash/fakeip_port_groups ]; then
-        rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
+        [ -n "$prepare_batch" ] || rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
         return 0
     fi
     hash nft 2>/dev/null || return 0
@@ -1818,7 +1823,7 @@ apply_grouped_port_nft_rules_impl() {
         warn "Grouped source digest is missing; refusing to apply an unverified batch"
         return 1
     }
-    batch_digest=$(printf '%s|%s|%s|%s' "$source_digest" "$PROXY_MODE" "$MARK_TPROXY" "$MARK_TUN_UDP" | md5sum 2>/dev/null | awk '{print $1}')
+    batch_digest=$(printf 'group-chain-v1|%s|%s|%s|%s' "$source_digest" "$PROXY_MODE" "$MARK_TPROXY" "$MARK_TUN_UDP" | md5sum 2>/dev/null | awk '{print $1}')
     saved_batch_digest=""
     [ -f "$batch_digest_file" ] && saved_batch_digest=$(cat "$batch_digest_file" 2>/dev/null)
     batch_checksum=""
@@ -1890,25 +1895,25 @@ apply_grouped_port_nft_rules_impl() {
         case "$network" in
             tcp)
                 if [ "$action" = "reject" ]; then
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
                 else
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
                 fi
                 ;;
             udp)
                 if [ "$action" = "reject" ]; then
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
                 else
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
                 fi
                 ;;
             *)
                 if [ "$action" = "reject" ]; then
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s tcp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s udp dport %s counter reject\n' "$set_name" "$port_expr" >> "$batch_tmp"
                 else
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
-                    printf 'add rule inet clash CLASH_MARK ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s tcp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$MARK_TPROXY" >> "$batch_tmp"
+                    printf 'add rule inet clash ASCLASH_GROUPED ip daddr @%s udp dport %s counter meta mark set %s\n' "$set_name" "$port_expr" "$udp_mark" >> "$batch_tmp"
                 fi
                 ;;
         esac
@@ -1918,11 +1923,20 @@ apply_grouped_port_nft_rules_impl() {
         rm -f "$batch_tmp" "$batch" "$batch_digest_file" "$GROUPED_FAKEIP_BATCH_CHECKSUM_FILE"
         return 0
     fi
-    if ! nft -c -f "$batch_tmp"; then
+    if [ -z "$prepare_batch" ] && ! nft -c -f "$batch_tmp"; then
         rm -f "$batch_tmp"
         warn "Generated grouped nft batch failed validation; cached batch was preserved"
         return 1
     fi
+    fi
+
+    if [ -n "$prepare_batch" ]; then
+        if [ "$cache_hit" = "true" ]; then
+            cp "$batch" "$prepare_batch" || return 1
+        else
+            mv -f "$batch_tmp" "$prepare_batch" || return 1
+        fi
+        return 0
     fi
 
     if [ "$GROUPED_FAKEIP_PORT_RULES_DRY_RUN" = "true" ]; then
@@ -3418,6 +3432,7 @@ rollback_nft_rules() {
     local restore_policy="${2:-false}"
     local previous_snapshot="$NFT_PREVIOUS_TABLE_SNAPSHOT"
     local previous_restored="false"
+    rm -f "$FAKEIP_WHITELIST_DIGEST_FILE" "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
     NFT_FAILURE_TRACKER=""
     [ -n "$1" ] && rm -f "$1"
     teardown_nft_tun_forward_rules
@@ -3481,6 +3496,8 @@ apply_nft_rules_impl() {
     # `update` can rebuild this table without calling stop(). Remove the fw4
     # accept hooks first; they live outside inet clash and would otherwise be
     # inserted again on every grouped-source refresh.
+    # A rebuild or rollback invalidates the markers even if the table survives.
+    rm -f "$FAKEIP_WHITELIST_DIGEST_FILE" "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE"
     teardown_nft_tun_forward_rules
     nft delete table inet clash 2>/dev/null
     local nft_failure_file="/tmp/clash/nft_apply_failed.$$"
@@ -3497,6 +3514,7 @@ apply_nft_rules_impl() {
     nft add chain inet clash proxy '{ type filter hook prerouting priority -100; policy accept; }'
     nft add chain inet clash output '{ type route hook output priority mangle; policy accept; }'
     nft add chain inet clash CLASH_MARK
+    nft add chain inet clash ASCLASH_GROUPED
     FORCE_DNS_REDIRECT_ACTIVE="false"
     if [ "$FORCE_DNS_REDIRECT" = "true" ]; then
         apply_nft_force_dns_redirect || { rollback_nft_rules "$nft_failure_file"; return 1; }
@@ -3578,6 +3596,7 @@ apply_nft_rules_impl() {
 
     # Apply grouped provider/port rules after service, reserved-network and
     # proxy-server exclusions so those returns always take precedence.
+    nft add rule inet clash CLASH_MARK jump ASCLASH_GROUPED
     if [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; then
         apply_grouped_port_nft_rules || { rollback_nft_rules "$nft_failure_file"; return 1; }
     fi
@@ -4004,6 +4023,65 @@ refresh_fakeip_whitelist_file_impl() {
     return 0
 }
 
+# Replace the whitelist and all grouped sets/rules in one kernel transaction.
+# The caller holds the operation lock. Only fp_ sets are owned by this code.
+apply_fakeip_policy_transaction() {
+    local whitelist_digest="$1" source_digest applied_digest previous_digest
+    local base="/tmp/clash/fakeip_policy.$$" sets_file="/tmp/clash/fakeip_policy.$$.sets"
+    local grouped_batch="/tmp/clash/fakeip_policy.$$.grouped" set_name
+    nft list set inet clash fakeip_whitelist >/dev/null 2>&1 || return 1
+    if ! nft list chain inet clash ASCLASH_GROUPED >/dev/null 2>&1; then
+        # Tables built by older versions do not have a safe replacement point.
+        # start() performs the existing snapshot/rollback migration under the lock.
+        msg "Migrating legacy grouped firewall layout"
+        rm -f "$FAKEIP_WHITELIST_DIGEST_FILE"
+        start || return 1
+        return 0
+    fi
+    source_digest=empty
+    if [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = true ] && [ "$GROUPED_FAKEIP_PORT_RULES_DRY_RUN" != true ] && [ -s /tmp/clash/fakeip_port_groups ]; then
+        source_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
+        [ -n "$source_digest" ] || return 1
+    fi
+    applied_digest=$(cat "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE" 2>/dev/null || :)
+    previous_digest=$(cat "$FAKEIP_WHITELIST_DIGEST_FILE" 2>/dev/null || :)
+    if [ "$source_digest" = "$applied_digest" ] && [ "$whitelist_digest" = "$previous_digest" ]; then
+        return 0
+    fi
+    if ! nft -t list table inet clash > "$sets_file"; then
+        rm -f "$sets_file"
+        return 1
+    fi
+    if ! apply_grouped_port_nft_rules "$grouped_batch"; then
+        rm -f "$sets_file" "$grouped_batch"
+        return 1
+    fi
+    {
+        printf 'flush set inet clash fakeip_whitelist\n'
+        awk 'BEGIN { n=0; line="" } NF { if (n++) line=line ","; line=line $0; if (n==500) { print "add element inet clash fakeip_whitelist { " line " }"; n=0; line="" } } END { if (n) print "add element inet clash fakeip_whitelist { " line " }" }' "$FAKEIP_WHITELIST_IPS_FILE"
+        printf 'flush chain inet clash ASCLASH_GROUPED\n'
+        awk '$1 == "set" && $2 ~ /^fp_[0-9a-f]+$/ { print $2 }' "$sets_file" | while IFS= read -r set_name; do
+            printf 'delete set inet clash %s\n' "$set_name"
+        done
+        cat "$grouped_batch"
+    } > "$base" || { rm -f "$base" "$sets_file" "$grouped_batch"; return 1; }
+    if ! nft -c -f "$base" || ! profile_run plain_nft nft -f "$base"; then
+        rm -f "$base" "$sets_file" "$grouped_batch"
+        warn "Fake-IP policy transaction failed; the previous policy remains active"
+        return 1
+    fi
+    rm -f "$base" "$sets_file" "$grouped_batch"
+    # Failed marker writes force a retry: they never imply a kernel rollback.
+    if ! printf '%s\n' "$source_digest" > "${GROUPED_FAKEIP_APPLIED_DIGEST_FILE}.tmp.$$" ||
+       ! printf '%s\n' "$whitelist_digest" > "${FAKEIP_WHITELIST_DIGEST_FILE}.tmp.$$" ||
+       ! mv -f "${GROUPED_FAKEIP_APPLIED_DIGEST_FILE}.tmp.$$" "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE" ||
+       ! mv -f "${FAKEIP_WHITELIST_DIGEST_FILE}.tmp.$$" "$FAKEIP_WHITELIST_DIGEST_FILE"; then
+        rm -f "$GROUPED_FAKEIP_APPLIED_DIGEST_FILE" "$FAKEIP_WHITELIST_DIGEST_FILE" "${GROUPED_FAKEIP_APPLIED_DIGEST_FILE}.tmp.$$" "${FAKEIP_WHITELIST_DIGEST_FILE}.tmp.$$"
+        warn "Fake-IP policy applied, but its confirmation markers could not be saved"
+        return 1
+    fi
+}
+
 update_fakeip_whitelist_sets() {
     msg "Updating fakeip whitelist IP-CIDR sets..."
     [ -n "$ASCLASH_PROGRESS_ID" ] || ASCLASH_PROGRESS_ID="whitelist-$$"
@@ -4081,7 +4159,7 @@ update_fakeip_whitelist_sets() {
     # we last applied (digest in tmpfs). Saves kernel work; digest is cleared on
     # blacklist mode above and lost on reboot (full refresh — correct).
     mkdir -p /tmp/clash 2>/dev/null
-    local current_digest prev_digest
+    local current_digest
     if [ ! -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
         current_digest="empty"
     elif command -v sha256sum >/dev/null 2>&1; then
@@ -4089,72 +4167,13 @@ update_fakeip_whitelist_sets() {
     else
         current_digest=$(LC_ALL=C sort -u "$FAKEIP_WHITELIST_IPS_FILE" | md5sum | awk '{print $1}')
     fi
-    prev_digest=""
-    [ -f "$FAKEIP_WHITELIST_DIGEST_FILE" ] && prev_digest=$(tr -d '\r\n' < "$FAKEIP_WHITELIST_DIGEST_FILE")
-    if [ -n "$prev_digest" ] && [ "$current_digest" = "$prev_digest" ]; then
-        msg "Fakeip whitelist nft set unchanged (same CIDR digest, skipping rewrite)"
-        case "$ASCLASH_FAKEIP_STATE" in
-            fallback|partial) ;;
-            manual) ASCLASH_FAKEIP_STATE="applied-manual" ;;
-            *) ASCLASH_FAKEIP_STATE="applied" ;;
-        esac
-        return 0
-    fi
-
     set_list_progress "applying"
-    if hash nft 2>/dev/null; then
-        if nft list set inet clash fakeip_whitelist >/dev/null 2>&1; then
-            local nft_batch="/tmp/clash/fakeip_whitelist_nft.$$"
-            {
-                printf 'flush set inet clash fakeip_whitelist\n'
-                if [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
-                    awk '
-                        BEGIN { count=0; line="" }
-                        {
-                            if (count > 0) line = line ","
-                            line = line $0
-                            count++
-                            if (count >= 500) {
-                                print "add element inet clash fakeip_whitelist { " line " }"
-                                line = ""; count = 0
-                            }
-                        }
-                        END { if (count > 0) print "add element inet clash fakeip_whitelist { " line " }" }
-                    ' "$FAKEIP_WHITELIST_IPS_FILE"
-                fi
-            } > "$nft_batch"
-            if profile_run plain_nft nft -f "$nft_batch"; then
-                rm -f "$nft_batch"
-                if [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
-                    msg "Updated nft fakeip_whitelist set: $(wc -l < "$FAKEIP_WHITELIST_IPS_FILE" | xargs) entries"
-                else
-                    msg "Fakeip whitelist file is empty, nft set cleared"
-                fi
-            else
-                rm -f "$nft_batch"
-                msg "ERROR: Failed to update nft fakeip_whitelist set; keeping previous set contents"
-                ASCLASH_FAKEIP_STATE="error"
-                set_list_progress "failed"
-                return 1
-            fi
-            if ! printf '%s\n' "$current_digest" > "$FAKEIP_WHITELIST_DIGEST_FILE"; then
-                ASCLASH_FAKEIP_STATE="error"
-                set_list_progress "failed"
-                return 1
-            fi
-        else
-            msg "WARNING: nft set inet clash fakeip_whitelist not found — is the clash-rules firewall active?"
-            ASCLASH_FAKEIP_STATE="error"
-            set_list_progress "failed"
-            return 1
-        fi
-    else
-        msg "ERROR: nftables fakeip set is unavailable"
+    if ! apply_fakeip_policy_transaction "$current_digest"; then
         ASCLASH_FAKEIP_STATE="error"
+        ASCLASH_GROUPED_STATE="error"
         set_list_progress "failed"
         return 1
     fi
-
     msg "Fakeip whitelist sets updated successfully"
     case "$ASCLASH_FAKEIP_STATE" in
         fallback|partial) ;;
@@ -4597,7 +4616,7 @@ finalize_grouped_list_diagnostics() {
 }
 
 run_update_cycle() {
-    local trigger="$1" readiness="$2" old_grouped_digest new_grouped_digest update_rc
+    local trigger="$1" readiness="$2" update_rc
     acquire_update_lock || return 0
     ASCLASH_OPERATION_LOCK_HELD="true"
     ASCLASH_UPDATE_DEFERRED="false"
@@ -4605,30 +4624,12 @@ run_update_cycle() {
     ASCLASH_LIST_CYCLE_ACTIVE="true"
     begin_list_diagnostics "checking" "update-$$" "$trigger"
     set_list_progress "building"
-    old_grouped_digest=""
-    [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && old_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
     update_rules
     update_rc=$?
     if [ "$update_rc" -ne 0 ]; then
         set_list_progress "failed"
         [ "$ASCLASH_FAKEIP_STATE" = "checking" ] && ASCLASH_FAKEIP_STATE="error"
         [ "$ASCLASH_GROUPED_STATE" = "checking" ] && ASCLASH_GROUPED_STATE="error"
-    fi
-    if [ "$update_rc" -eq 0 ] && [ "$ASCLASH_UPDATE_DEFERRED" != "true" ] && [ "$GROUPED_FAKEIP_PORT_RULES_ENABLED" = "true" ]; then
-        new_grouped_digest=""
-        [ -f "$GROUPED_FAKEIP_DIGEST_FILE" ] && new_grouped_digest=$(cat "$GROUPED_FAKEIP_DIGEST_FILE" 2>/dev/null)
-        if [ -n "$new_grouped_digest" ] && [ "$new_grouped_digest" != "$old_grouped_digest" ]; then
-            if hash nft 2>/dev/null; then
-                msg "Grouped fakeip sources changed, rebuilding nftables rules"
-                rm -f /tmp/clash/fakeip_port_groups.nft
-                start || update_rc=$?
-            else
-                msg "Grouped fakeip sources changed; nftables is unavailable, skipping grouped-rule rebuild"
-                ASCLASH_GROUPED_STATE="error"
-            fi
-        else
-            msg "Grouped fakeip sources unchanged, keeping active nftables rules"
-        fi
     fi
     if [ "$update_rc" -ne 0 ]; then
         set_list_progress "failed"
