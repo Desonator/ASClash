@@ -52,6 +52,21 @@ done
 
 cat > "$TEST_DIR/config.yaml" <<'EOF'
 dns:
+  enable: true
+  enhanced-mode: fake-ip
+  fake-ip-filter-mode: whitelist
+  nested:
+    enable: false
+    enhanced-mode: normal
+    fake-ip-filter-mode: blacklist
+EOF
+[ "$("$TEST_DIR/check.sh" "$TEST_DIR/config.yaml")" = '198.18.0.0/15|whitelist' ] || {
+	echo 'Nested DNS options changed the top-level Fake-IP policy' >&2
+	exit 1
+}
+
+cat > "$TEST_DIR/config.yaml" <<'EOF'
+dns:
   enable: false
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.0/15

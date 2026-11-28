@@ -128,6 +128,15 @@ Parsed providers are cached in RAM by content, behavior, format and parser versi
 
 ## Traffic processing and IP-CIDR lists
 
+The path of client IPv4 traffic has four stages:
+
+1. Interface mode selects the clients processed by ASClash. When enabled, forced DNS redirects eligible TCP/UDP port 53 queries to the router.
+2. With Fake-IP, the firewall recognizes the configured range. In `whitelist` and `rule` modes, plain and grouped IP-CIDR lists also select matching connections to real addresses for Mihomo.
+3. The firewall applies exclusions and source policy, then marks traffic. TPROXY, TUN or MIXED delivers it to the core, where Mihomo rules determine the final action.
+4. List refreshes apply the plain and grouped lists in one nftables transaction. A failed transaction leaves the previous active policy in place; service startup rebuilds the table.
+
+The plain set remains connected to firewall rules even if empty at startup, so addresses loaded later take effect without rebuilding the table. Restart the service after changing network mode or DNS configuration.
+
 ASClash installs firewall and policy-routing rules for selected interfaces. Reserved/local networks, proxy-server addresses, service ports and already-marked traffic are excluded to reduce routing loops. The firewall decides which connections reach Mihomo; Mihomo's configuration and rule order decide the final route/action for those connections.
 
 ### DIRECT for a selected device

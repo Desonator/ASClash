@@ -194,9 +194,14 @@ setup_dns() {
 		}
 		return s
 	}
-	/^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; next }
+	/^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; dns_indent = 0; next }
 	/^[^[:space:]#][^:]*:[[:space:]]*/ { if ($1 != "dns:") in_dns = 0 }
 	in_dns {
+		if ($0 ~ /^[[:space:]]*($|#)/) next
+		match($0, /^[[:space:]]*/)
+		indent = RLENGTH
+		if (!dns_indent) dns_indent = indent
+		if (indent != dns_indent) next
 		line = $0
 		sub(/[[:space:]]+#.*/, "", line)
 		if (line ~ /^[[:space:]]*enable:[[:space:]]*/) {

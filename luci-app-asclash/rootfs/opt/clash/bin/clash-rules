@@ -1036,9 +1036,14 @@ extract_fake_ip_config() {
         sub(/[[:space:]]+#.*/, "", line)
         return scalar(line)
     }
-    /^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; next }
+    /^dns:[[:space:]]*(#.*)?$/ { in_dns = 1; dns_indent = 0; next }
     /^[^[:space:]#][^:]*:[[:space:]]*/ { if ($1 != "dns:") in_dns = 0 }
     in_dns {
+        if ($0 ~ /^[[:space:]]*($|#)/) next
+        match($0, /^[[:space:]]*/)
+        indent = RLENGTH
+        if (!dns_indent) dns_indent = indent
+        if (indent != dns_indent) next
         if ($0 ~ /^[[:space:]]*enable[[:space:]]*:/) enable = tolower(value($0, "enable"))
         else if ($0 ~ /^[[:space:]]*enhanced-mode[[:space:]]*:/) mode = tolower(value($0, "enhanced-mode"))
         else if ($0 ~ /^[[:space:]]*fake-ip-range[[:space:]]*:/) range = value($0, "fake-ip-range")
@@ -3097,7 +3102,7 @@ apply_nft_marking_mangle() {
         msg "Marking applied for all traffic (UDP mark: $udp_mark)"
     fi
     # Additionally mark traffic to fakeip whitelist IP-CIDR entries (whitelist/rule modes)
-    if is_ipcidr_whitelist_mode && [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+    if is_ipcidr_whitelist_mode; then
         nft add rule inet clash CLASH_MARK ip daddr @fakeip_whitelist meta l4proto tcp counter meta mark set "$MARK_TPROXY"
         nft add rule inet clash CLASH_MARK ip daddr @fakeip_whitelist meta l4proto udp counter meta mark set "$udp_mark"
         msg "Marking also applied for fakeip whitelist IP-CIDR nft set (UDP mark: $udp_mark, mode: $FAKE_IP_FILTER_MODE)"
@@ -3397,7 +3402,7 @@ apply_nft_output_rules() {
 
         # Additionally mark locally generated traffic to fakeip whitelist
         # IP-CIDR entries before root bypass.
-        if { [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; } && [ -s "$FAKEIP_WHITELIST_IPS_FILE" ]; then
+        if [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; then
             nft add rule inet clash output ip daddr @fakeip_whitelist meta mark 0 meta l4proto tcp counter meta mark set "$MARK_TPROXY"
             nft add rule inet clash output ip daddr @fakeip_whitelist meta l4proto udp counter meta mark set "$output_udp_mark"
             msg "OUTPUT: Marking also applied for fakeip whitelist IP-CIDR nft set"
@@ -3594,14 +3599,16 @@ apply_nft_rules_impl() {
         msg "Minimal exclusion rules applied (fake-ip-filter-mode: whitelist - only system protection)"
     fi
 
-    # Apply grouped provider/port rules after service, reserved-network and
-    # proxy-server exclusions so those returns always take precedence.
+    # Source DIRECT/REJECT policy must run before grouped destinations can mark
+    # traffic. A return from a later rule does not clear an existing mark.
+    apply_nft_src_ip_cidr_policy
+
+    # Apply grouped provider/port rules after the exclusion and source policy.
     nft add rule inet clash CLASH_MARK jump ASCLASH_GROUPED
     if [ "$fake_ip_filter_mode" = "whitelist" ] || [ "$fake_ip_filter_mode" = "rule" ]; then
         apply_grouped_port_nft_rules || { rollback_nft_rules "$nft_failure_file"; return 1; }
     fi
 
-    apply_nft_src_ip_cidr_policy
     apply_nft_src_ip_cidr_marking "$server_ips"
     apply_nft_src_ip_cidr_managed_direct_marking "$server_ips"
     apply_nft_marking_mangle "$fake_ip_range"
