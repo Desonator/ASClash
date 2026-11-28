@@ -5,7 +5,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-asclash
-PKG_VERSION:=4.8.5.8
+PKG_VERSION:=4.8.5.9
 PKG_RELEASE:=1
 PKG_MAINTAINER:=Desonator <https://github.com/Desonator>
 
@@ -157,6 +157,12 @@ endef
 
 define Package/$(PKG_NAME)/postrm
 #!/bin/sh
+case "$$1" in
+	upgrade|failed-upgrade)
+		# opkg calls the old postrm during upgrades; preserve runtime state.
+		exit 0
+		;;
+esac
 [ -n "$$IPKG_INSTROOT" ] || {
 	# Clean up cron job for clash-rules update, if present
 	CRON_FILE="/etc/crontabs/root"

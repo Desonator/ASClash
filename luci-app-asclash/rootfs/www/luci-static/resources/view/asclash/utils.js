@@ -11,7 +11,7 @@ const WRITE_INLINE_MAX = 32768;
 const MAX_CLASH_TEST_ERROR_LEN = 8000;
 const LIST_PROGRESS_PATH = '/tmp/clash/asclash-list-progress';
 // Keep in sync with luci-app-asclash/Makefile PKG_VERSION.
-const ASCLASH_VERSION = '4.8.5.8';
+const ASCLASH_VERSION = '4.8.5.9';
 
 function unescapeLogString(s) {
     return String(s)
