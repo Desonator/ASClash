@@ -247,31 +247,52 @@ function createASClashUpdateSection() {
     const currentVersion = view_asclash_utils.ASCLASH_VERSION;
     const statusFile = '/tmp/asclash-update.status';
     const section = E('div', { 'class': 'cbi-section', 'style': 'margin: 15px 0;' });
-    const status = E('span', { 'class': 'cbi-section-descr', 'style': 'margin: 0;' }, _('Checking for ASClash updates…'));
-    const checkButton = E('button', { 'class': 'btn', 'style': 'margin: 0 6px 0 0;' }, _('Check for updates'));
-    const updateButton = E('button', { 'class': 'btn cbi-button-action', 'style': 'margin: 0;', 'disabled': 'disabled' }, _('Update ASClash'));
+    const status = E('span', {
+        'style': 'display:inline-block;padding:4px 9px;border:1px solid #6c757d;border-radius:4px;color:#adb5bd;white-space:nowrap;'
+    }, _('Checking for ASClash updates…'));
+    const checkButton = E('button', { 'class': 'btn', 'style': 'margin:0;display:none;' }, _('Check for updates'));
+    const updateButton = E('button', { 'class': 'btn cbi-button-action', 'style': 'margin:0;display:none;' }, _('Update ASClash'));
     let updateAvailable = false;
     let pollTimer = null;
     let reloadScheduled = false;
 
-    const setStatus = message => { status.textContent = message; };
+    const setStatus = (message, state = 'neutral') => {
+        const colors = {
+            success: ['#198754', '#198754', '#fff'],
+            warning: ['#ffc107', '#ffc107', '#212529'],
+            error: ['#dc3545', '#dc3545', '#fff'],
+            neutral: ['#6c757d', '#6c757d', '#fff']
+        }[state];
+        status.textContent = message;
+        status.style.borderColor = colors[0];
+        status.style.backgroundColor = colors[1];
+        status.style.color = colors[2];
+    };
+
+    const showAction = (button, visible) => { button.style.display = visible ? '' : 'none'; };
 
     async function checkForUpdate() {
         checkButton.disabled = true;
         updateButton.disabled = true;
+        showAction(checkButton, false);
+        showAction(updateButton, false);
         setStatus(_('Checking for ASClash updates…'));
         try {
             const result = await fs.exec('/opt/clash/bin/asclash-update', ['check']);
             const latest = String(result.stdout || '').trim();
             if (result.code !== 0 || !latest) throw new Error(result.stderr || _('Could not check for ASClash updates.'));
             updateAvailable = compareASClashVersions(latest, currentVersion) > 0;
-            setStatus(updateAvailable
-                ? _('ASClash update available: v%s').format(latest)
-                : _('ASClash is up to date.'));
-            updateButton.disabled = !updateAvailable;
+            if (updateAvailable) {
+                setStatus(_('ASClash update available: v%s').format(latest), 'warning');
+                showAction(updateButton, true);
+                updateButton.disabled = false;
+            } else {
+                setStatus(_('ASClash is up to date.'), 'success');
+            }
         } catch (_error) {
             updateAvailable = false;
-            setStatus(_('Could not check for ASClash updates.'));
+            setStatus(_('Could not check for ASClash updates.'), 'error');
+            showAction(checkButton, true);
         } finally {
             checkButton.disabled = false;
         }
@@ -288,15 +309,21 @@ function createASClashUpdateSection() {
             const phase = state[0] || 'idle';
             const version = state[1] || '';
             if (phase === 'queued' || phase === 'downloading') {
-                setStatus(_('Downloading ASClash package…'));
+                setStatus(_('Downloading ASClash package…'), 'warning');
+                showAction(checkButton, false);
+                showAction(updateButton, false);
                 checkButton.disabled = true;
                 updateButton.disabled = true;
             } else if (phase === 'installing') {
-                setStatus(_('Installing ASClash update…'));
+                setStatus(_('Installing ASClash update…'), 'warning');
+                showAction(checkButton, false);
+                showAction(updateButton, false);
                 checkButton.disabled = true;
                 updateButton.disabled = true;
             } else if (phase === 'done') {
-                setStatus(_('ASClash updated to v%s. Reloading page…').format(version));
+                setStatus(_('ASClash updated to v%s. Reloading page…').format(version), 'success');
+                showAction(checkButton, false);
+                showAction(updateButton, false);
                 checkButton.disabled = true;
                 updateButton.disabled = true;
                 if (!reloadScheduled && compareASClashVersions(version, currentVersion) > 0) {
@@ -305,12 +332,15 @@ function createASClashUpdateSection() {
                 }
                 if (pollTimer) clearInterval(pollTimer);
             } else if (phase === 'failed') {
-                setStatus(_('ASClash update failed. Check the system log.'));
+                setStatus(_('ASClash update failed. Check the system log.'), 'error');
+                showAction(checkButton, true);
+                showAction(updateButton, false);
                 checkButton.disabled = false;
-                updateButton.disabled = !updateAvailable;
                 if (pollTimer) clearInterval(pollTimer);
             } else if (phase !== 'idle' && phase !== '') {
                 setStatus(_('Another ASClash update is already in progress.'));
+                showAction(checkButton, false);
+                showAction(updateButton, false);
             }
         } catch (_error) {
             // rpcd reloads during package installation; keep polling until it returns.
@@ -321,27 +351,29 @@ function createASClashUpdateSection() {
         if (!updateAvailable) return;
         checkButton.disabled = true;
         updateButton.disabled = true;
-        setStatus(_('Starting ASClash update…'));
+        setStatus(_('Starting ASClash update…'), 'warning');
+        showAction(checkButton, false);
+        showAction(updateButton, false);
         try {
             const result = await fs.exec('/opt/clash/bin/asclash-update', ['start']);
             if (result.code !== 0) throw new Error(result.stderr || _('ASClash update failed. Check the system log.'));
             if (!pollTimer) pollTimer = setInterval(pollUpdateStatus, 1500);
             await pollUpdateStatus();
         } catch (_error) {
-            setStatus(_('ASClash update failed. Check the system log.'));
+            setStatus(_('ASClash update failed. Check the system log.'), 'error');
             checkButton.disabled = false;
-            updateButton.disabled = !updateAvailable;
+            showAction(checkButton, true);
+            showAction(updateButton, false);
         }
     }
 
     checkButton.addEventListener('click', checkForUpdate);
     updateButton.addEventListener('click', startUpdate);
-    section.appendChild(E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' }, [
-        E('h3', { 'style': 'margin:0 8px 0 0;' }, _('ASClash update')),
-        E('span', { 'class': 'cbi-section-descr', 'style': 'margin:0;' }, _('Installed version: v%s').format(currentVersion)),
+    section.appendChild(E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+        E('h3', { 'style': 'margin:0;' }, 'ASClash v' + currentVersion),
+        status,
         checkButton,
-        updateButton,
-        status
+        updateButton
     ]));
 
     setTimeout(async () => {

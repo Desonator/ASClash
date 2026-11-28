@@ -267,7 +267,8 @@ function createKernelManagementSection() {
 	]);
 	const repoInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'owner/repository', style: 'min-width: 220px;' });
 	const saveButton = E('button', { class: 'btn' }, localized('Save release source', 'Сохранить источник'));
-	const status = E('div', { style: `margin: 15px 0; padding: 12px; border: 1px solid ${border}; border-radius: 4px; background: ${card}; color: ${text};` }, localized('Checking kernel status...', 'Проверка состояния ядра...'));
+	const status = E('div', { style: `margin: 15px 0; padding: 12px; border: 1px solid ${border}; border-radius: 4px; background: ${card}; color: ${text};` });
+	const statusContent = E('div', {}, localized('Checking kernel status...', 'Проверка состояния ядра...'));
 	const downloadButton = E('button', { class: 'btn' }, _('Download Latest Kernel'));
 	const refreshButton = E('button', { class: 'btn', style: 'margin-left: 10px;' }, _('Refresh Status'));
 	const restartButton = E('button', { class: 'btn', style: 'margin-left: 10px;' }, localized('Restart Service', 'Перезапустить службу'));
@@ -276,11 +277,11 @@ function createKernelManagementSection() {
 		'Restart Clash service after installing or updating the kernel',
 		'Перезапустите службу Clash после установки или обновления ядра'
 	));
+	status.append(statusContent, notice);
 	container.appendChild(E('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0;' }, [
 		E('label', { class: 'cbi-value-title', style: 'width:auto;' }, localized('Release source', 'Источник релизов')), sourceSelect, repoInput, saveButton
 	]));
 	container.appendChild(status);
-	container.appendChild(notice);
 	container.appendChild(actions);
 
 	let badgesUpdating = false;
@@ -352,12 +353,12 @@ function createKernelManagementSection() {
 				rows.push(E('div', { style: 'margin-top:5px;color:#dc3545' }, `❌ ${_('Failed to check latest version')}`));
 				downloadButton.textContent = installed.installed ? _('Reinstall Kernel') : _('Download Latest Kernel');
 			}
-			status.replaceChildren(...rows);
+			statusContent.replaceChildren(...rows);
 		} catch (e) {
-			status.textContent = _('Failed to check kernel status: %s').format(e.message);
+			statusContent.textContent = _('Failed to check kernel status: %s').format(e.message);
 			downloadButton.textContent = _('Download Latest Kernel');
 		} finally {
-			if (!status.textContent.includes(_('Failed to check kernel status'))) downloadButton.disabled = false;
+			if (!statusContent.textContent.includes(_('Failed to check kernel status'))) downloadButton.disabled = false;
 		}
 	}
 	readRepository().then(value => {
