@@ -1579,3 +1579,45 @@ msgstr "Firewall ещё не активен; списки на основе prov
 msgid "Firewall is not active; list refresh is deferred until Clash starts"
 msgstr "Firewall ещё не активен; обновление списков отложено до запуска Clash"
 
+msgid "ASClash update"
+msgstr "Обновление ASClash"
+
+msgid "Installed version: v%s"
+msgstr "Установленная версия: v%s"
+
+msgid "Check for updates"
+msgstr "Проверить обновления"
+
+msgid "Update ASClash"
+msgstr "Обновить ASClash"
+
+msgid "Checking for ASClash updates…"
+msgstr "Проверка обновлений ASClash…"
+
+msgid "Could not check for ASClash updates."
+msgstr "Не удалось проверить обновления ASClash."
+
+msgid "ASClash update available: v%s"
+msgstr "Доступно обновление ASClash: v%s"
+
+msgid "ASClash is up to date."
+msgstr "Установлена последняя версия ASClash."
+
+msgid "Downloading ASClash package…"
+msgstr "Загрузка пакета ASClash…"
+
+msgid "Installing ASClash update…"
+msgstr "Установка обновления ASClash…"
+
+msgid "ASClash updated to v%s. Reloading page…"
+msgstr "ASClash обновлён до v%s. Обновляю страницу…"
+
+msgid "ASClash update failed. Check the system log."
+msgstr "Не удалось обновить ASClash. Проверьте системный журнал."
+
+msgid "Another ASClash update is already in progress."
+msgstr "Обновление ASClash уже выполняется."
+
+msgid "Starting ASClash update…"
+msgstr "Запуск обновления ASClash…"
+

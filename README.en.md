@@ -22,6 +22,7 @@ The comparison below is with the LuCI application in the [SSClash repository](ht
 | Per-device DIRECT | Selecting a permanent IPv4 DHCP reservation adds a LuCI-managed Mihomo rule: the selected device's traffic goes through the core and exits directly. |
 | Smart groups | An optional Status-page widget displays servers and weights for `type: smart` groups when the selected core exposes the required API. |
 | Kernel source | The installer offers official Mihomo or Prizrak-Core. The selection is saved in settings; router architecture is detected automatically. |
+| Project updates | The Status tab can check for and install the latest ASClash package without showing release notes. This action does not update the Mihomo core. |
 | Service operation | Status notifications report service restarts and rule-list generation/application; the configuration page includes service controls and a dashboard link. |
 
 See [Traffic processing and IP-CIDR lists](#traffic-processing-and-ip-cidr-lists) for behavior and limitations.

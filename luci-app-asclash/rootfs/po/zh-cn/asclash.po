@@ -1563,3 +1563,45 @@ msgstr "防火墙尚未启用；Clash 启动后将刷新基于 provider 的防�
 msgid "Firewall is not active; list refresh is deferred until Clash starts"
 msgstr "防火墙尚未启用；列表刷新将推迟到 Clash 启动后"
 
+msgid "ASClash update"
+msgstr "更新 ASClash"
+
+msgid "Installed version: v%s"
+msgstr "已安装版本：v%s"
+
+msgid "Check for updates"
+msgstr "检查更新"
+
+msgid "Update ASClash"
+msgstr "更新 ASClash"
+
+msgid "Checking for ASClash updates…"
+msgstr "正在检查 ASClash 更新…"
+
+msgid "Could not check for ASClash updates."
+msgstr "无法检查 ASClash 更新。"
+
+msgid "ASClash update available: v%s"
+msgstr "ASClash 有可用更新：v%s"
+
+msgid "ASClash is up to date."
+msgstr "ASClash 已是最新版本。"
+
+msgid "Downloading ASClash package…"
+msgstr "正在下载 ASClash 软件包…"
+
+msgid "Installing ASClash update…"
+msgstr "正在安装 ASClash 更新…"
+
+msgid "ASClash updated to v%s. Reloading page…"
+msgstr "ASClash 已更新到 v%s。正在重新加载页面…"
+
+msgid "ASClash update failed. Check the system log."
+msgstr "ASClash 更新失败。请检查系统日志。"
+
+msgid "Another ASClash update is already in progress."
+msgstr "另一个 ASClash 更新正在进行。"
+
+msgid "Starting ASClash update…"
+msgstr "正在启动 ASClash 更新…"
+

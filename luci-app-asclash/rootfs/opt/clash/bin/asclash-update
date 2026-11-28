@@ -1,0 +1,168 @@
+#!/bin/sh
+
+# Download and install only the latest ASClash package. Mihomo is untouched.
+set -u
+
+API_URL="https://api.github.com/repos/Desonator/ASClash/releases/latest"
+STATUS_FILE="/tmp/asclash-update.status"
+LOCK_DIR="/tmp/asclash-update.lock"
+LOG_TAG="asclash-update"
+
+log() {
+	logger -t "$LOG_TAG" "$*"
+}
+
+write_status() {
+	local state="$1" version="${2:-}" temp_file="${STATUS_FILE}.tmp.$$"
+	(umask 077; printf '%s|%s\n' "$state" "$version" > "$temp_file") || return 1
+	mv -f "$temp_file" "$STATUS_FILE"
+}
+
+get_package_format() {
+	if command -v apk >/dev/null 2>&1; then
+		printf 'apk\n'
+	elif command -v opkg >/dev/null 2>&1; then
+		printf 'ipk\n'
+	else
+		return 1
+	fi
+}
+
+release_version() {
+	printf '%s\n' "$1" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -n 1
+}
+
+release_package_url() {
+	local json="$1" format="$2"
+	printf '%s\n' "$json" | awk -v extension=".$format" '
+		/"name"[[:space:]]*:/ {
+			name = $0
+			sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", name)
+			sub(/".*/, "", name)
+		}
+		/"browser_download_url"[[:space:]]*:/ {
+			url = $0
+			sub(/.*"browser_download_url"[[:space:]]*:[[:space:]]*"/, "", url)
+			sub(/".*/, "", url)
+			lower_name = tolower(name)
+			if (index(lower_name, "luci-app-asclash") == 1 && length(lower_name) >= length(extension) && substr(lower_name, length(lower_name) - length(extension) + 1) == extension) {
+				print url
+				exit
+			}
+			name = ""
+		}
+	'
+}
+
+fetch_latest_release() {
+	local format json version url
+	format=$(get_package_format) || return 1
+	json=$(curl -fLsS --connect-timeout 10 --max-time 30 "$API_URL") || return 1
+	version=$(release_version "$json")
+	printf '%s\n' "$version" | awk -F. 'NF < 3 || NF > 4 { exit 1 } { for (i = 1; i <= NF; i++) if ($i !~ /^[0-9]+$/) exit 1 }' || return 1
+	url=$(release_package_url "$json" "$format")
+	[ -n "$url" ] || return 1
+	case "$url" in
+		https://github.com/Desonator/ASClash/releases/download/*) ;;
+		*) return 1 ;;
+	esac
+	printf '%s|%s\n' "$version" "$url"
+}
+
+run_update() {
+	local release version url format package_file
+	trap 'rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+	trap 'exit 1' HUP INT TERM
+	format=$(get_package_format) || {
+		write_status failed ""
+		log "No supported OpenWrt package manager found"
+		return 1
+	}
+	release=$(fetch_latest_release) || {
+		write_status failed ""
+		log "Could not resolve the latest ASClash package"
+		return 1
+	}
+	version=${release%%|*}
+	url=${release#*|}
+	write_status downloading "$version" || return 1
+	package_file="/tmp/luci-app-asclash-update-$$.$format"
+	if ! curl -fLsS --retry 2 --connect-timeout 15 --max-time 300 "$url" -o "$package_file"; then
+		rm -f "$package_file"
+		write_status failed "$version"
+		log "Download failed for ASClash $version"
+		return 1
+	fi
+	write_status installing "$version" || { rm -f "$package_file"; return 1; }
+	if [ "$format" = "apk" ]; then
+		apk add --allow-untrusted "$package_file" >/tmp/asclash-update-install.log 2>&1
+	else
+		opkg install "$package_file" >/tmp/asclash-update-install.log 2>&1
+	fi
+	local install_result=$?
+	rm -f "$package_file"
+	if [ "$install_result" -ne 0 ]; then
+		write_status failed "$version"
+		while IFS= read -r line; do
+			[ -n "$line" ] && log "package manager: $line"
+		done < /tmp/asclash-update-install.log
+		log "Package manager failed installing ASClash $version"
+		return "$install_result"
+	fi
+	write_status done "$version" || return 1
+	log "ASClash package updated to $version; Mihomo was not changed"
+}
+
+case "${1:-}" in
+	check)
+		release=$(fetch_latest_release) || exit 1
+		printf '%s\n' "${release%%|*}"
+		;;
+	status)
+		if [ -r "$STATUS_FILE" ]; then
+			cat "$STATUS_FILE"
+		else
+			printf 'idle|\n'
+		fi
+		;;
+	start)
+		mkdir -p /tmp || exit 1
+		if [ -d "$LOCK_DIR" ]; then
+			lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+			case "$lock_pid" in
+				''|*[!0-9]*)
+					printf 'running\n'
+					exit 0
+					;;
+			esac
+			if kill -0 "$lock_pid" 2>/dev/null; then
+				printf 'running\n'
+				exit 0
+			fi
+			rm -f "$LOCK_DIR/pid"
+			rmdir "$LOCK_DIR" 2>/dev/null || {
+				printf 'running\n'
+				exit 0
+			}
+		fi
+		if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+			printf 'running\n'
+			exit 0
+		fi
+		write_status queued "" || { rmdir "$LOCK_DIR"; exit 1; }
+		if command -v setsid >/dev/null 2>&1; then
+			setsid "$0" run >/dev/null 2>&1 </dev/null &
+		else
+			"$0" run >/dev/null 2>&1 </dev/null &
+		fi
+		printf '%s\n' "$!" > "$LOCK_DIR/pid" 2>/dev/null || true
+		printf '%s\n' started
+		;;
+	run)
+		[ -d "$LOCK_DIR" ] || exit 1
+		run_update
+		;;
+	*)
+		exit 2
+		;;
+esac

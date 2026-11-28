@@ -4,6 +4,8 @@
 'require view.asclash.utils';
 'require view.asclash.kernel';
 
+view_asclash_utils.bumpRpcTimeout();
+
 const rulesetPath = '/opt/clash/lst/';
 const FAKEIP_WHITELIST_SUMMARY_FILENAME = 'fakeip-whitelist-summary.txt';
 const FAKEIP_WHITELIST_FILENAME = 'fakeip-whitelist-ipcidr.txt';
@@ -222,6 +224,139 @@ function getWhitelistSummaryData(summary, whitelistFile) {
         providers = sourceNames.map(provider => ({ provider, count: '—' }));
 
     return { total: fallback ? autoCount : summaryCount, providers, fallback };
+}
+
+function compareASClashVersions(left, right) {
+    const parse = value => {
+        const match = String(value || '').match(/^v?(\d+(?:\.\d+){1,3})$/i);
+        return match ? match[1].split('.').map(part => Number(part)) : null;
+    };
+    const a = parse(left);
+    const b = parse(right);
+    if (!a || !b) return 0;
+    const count = Math.max(a.length, b.length);
+    for (let i = 0; i < count; i++) {
+        const av = a[i] || 0;
+        const bv = b[i] || 0;
+        if (av !== bv) return av > bv ? 1 : -1;
+    }
+    return 0;
+}
+
+function createASClashUpdateSection() {
+    const currentVersion = view_asclash_utils.ASCLASH_VERSION;
+    const statusFile = '/tmp/asclash-update.status';
+    const section = E('div', { 'class': 'cbi-section', 'style': 'margin: 15px 0;' });
+    const status = E('span', { 'class': 'cbi-section-descr', 'style': 'margin: 0;' }, _('Checking for ASClash updates…'));
+    const checkButton = E('button', { 'class': 'btn', 'style': 'margin: 0 6px 0 0;' }, _('Check for updates'));
+    const updateButton = E('button', { 'class': 'btn cbi-button-action', 'style': 'margin: 0;', 'disabled': 'disabled' }, _('Update ASClash'));
+    let updateAvailable = false;
+    let pollTimer = null;
+    let reloadScheduled = false;
+
+    const setStatus = message => { status.textContent = message; };
+
+    async function checkForUpdate() {
+        checkButton.disabled = true;
+        updateButton.disabled = true;
+        setStatus(_('Checking for ASClash updates…'));
+        try {
+            const result = await fs.exec('/opt/clash/bin/asclash-update', ['check']);
+            const latest = String(result.stdout || '').trim();
+            if (result.code !== 0 || !latest) throw new Error(result.stderr || _('Could not check for ASClash updates.'));
+            updateAvailable = compareASClashVersions(latest, currentVersion) > 0;
+            setStatus(updateAvailable
+                ? _('ASClash update available: v%s').format(latest)
+                : _('ASClash is up to date.'));
+            updateButton.disabled = !updateAvailable;
+        } catch (_error) {
+            updateAvailable = false;
+            setStatus(_('Could not check for ASClash updates.'));
+        } finally {
+            checkButton.disabled = false;
+        }
+    }
+
+    async function pollUpdateStatus() {
+        if (!section.isConnected) {
+            if (pollTimer) clearInterval(pollTimer);
+            return;
+        }
+        if (document.hidden) return;
+        try {
+            const state = String(await fs.read(statusFile)).trim().split('|');
+            const phase = state[0] || 'idle';
+            const version = state[1] || '';
+            if (phase === 'queued' || phase === 'downloading') {
+                setStatus(_('Downloading ASClash package…'));
+                checkButton.disabled = true;
+                updateButton.disabled = true;
+            } else if (phase === 'installing') {
+                setStatus(_('Installing ASClash update…'));
+                checkButton.disabled = true;
+                updateButton.disabled = true;
+            } else if (phase === 'done') {
+                setStatus(_('ASClash updated to v%s. Reloading page…').format(version));
+                checkButton.disabled = true;
+                updateButton.disabled = true;
+                if (!reloadScheduled && compareASClashVersions(version, currentVersion) > 0) {
+                    reloadScheduled = true;
+                    setTimeout(() => window.location.reload(), 1800);
+                }
+                if (pollTimer) clearInterval(pollTimer);
+            } else if (phase === 'failed') {
+                setStatus(_('ASClash update failed. Check the system log.'));
+                checkButton.disabled = false;
+                updateButton.disabled = !updateAvailable;
+                if (pollTimer) clearInterval(pollTimer);
+            } else if (phase !== 'idle' && phase !== '') {
+                setStatus(_('Another ASClash update is already in progress.'));
+            }
+        } catch (_error) {
+            // rpcd reloads during package installation; keep polling until it returns.
+        }
+    }
+
+    async function startUpdate() {
+        if (!updateAvailable) return;
+        checkButton.disabled = true;
+        updateButton.disabled = true;
+        setStatus(_('Starting ASClash update…'));
+        try {
+            const result = await fs.exec('/opt/clash/bin/asclash-update', ['start']);
+            if (result.code !== 0) throw new Error(result.stderr || _('ASClash update failed. Check the system log.'));
+            if (!pollTimer) pollTimer = setInterval(pollUpdateStatus, 1500);
+            await pollUpdateStatus();
+        } catch (_error) {
+            setStatus(_('ASClash update failed. Check the system log.'));
+            checkButton.disabled = false;
+            updateButton.disabled = !updateAvailable;
+        }
+    }
+
+    checkButton.addEventListener('click', checkForUpdate);
+    updateButton.addEventListener('click', startUpdate);
+    section.appendChild(E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' }, [
+        E('h3', { 'style': 'margin:0 8px 0 0;' }, _('ASClash update')),
+        E('span', { 'class': 'cbi-section-descr', 'style': 'margin:0;' }, _('Installed version: v%s').format(currentVersion)),
+        checkButton,
+        updateButton,
+        status
+    ]));
+
+    setTimeout(async () => {
+        await pollUpdateStatus();
+        const currentState = await L.resolveDefault(fs.read(statusFile), '');
+        if (/^(queued|downloading|installing)\|/.test(String(currentState).trim())) {
+            checkButton.disabled = true;
+            updateButton.disabled = true;
+            if (!pollTimer) pollTimer = setInterval(pollUpdateStatus, 1500);
+        } else {
+            checkForUpdate();
+        }
+    }, 0);
+
+    return section;
 }
 
 function createSmartWeightsSection(smartGroupNames, configContent, isRussian, showSmartWeights = true) {
@@ -628,6 +763,7 @@ return view.extend({
 
         const root = E('div', {}, [
             style,
+            createASClashUpdateSection(),
             createSmartWeightsSection(smartGroupNames, configContent, isRussian, showSmartWeights),
             view_asclash_kernel.createKernelManagementSection(),
             ...whitelistSections

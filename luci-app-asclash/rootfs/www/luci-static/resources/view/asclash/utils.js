@@ -10,6 +10,8 @@ const WRITE_CHUNK_SIZE = 8000;
 const WRITE_INLINE_MAX = 32768;
 const MAX_CLASH_TEST_ERROR_LEN = 8000;
 const LIST_PROGRESS_PATH = '/tmp/clash/asclash-list-progress';
+// Keep in sync with luci-app-asclash/Makefile PKG_VERSION.
+const ASCLASH_VERSION = '4.8.2.46';
 
 function unescapeLogString(s) {
     return String(s)
@@ -342,6 +344,7 @@ function monitorListProgress(previous) {
 }
 
 return L.Class.extend({
+    ASCLASH_VERSION: ASCLASH_VERSION,
     bumpRpcTimeout: bumpRpcTimeout,
     execDetached: execDetached,
     writeFile: writeFile,

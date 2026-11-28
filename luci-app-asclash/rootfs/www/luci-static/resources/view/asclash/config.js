@@ -236,9 +236,6 @@ async function initializeAceEditor(content) {
 // SECTION: ASClash version / release update footer helpers
 // =============================================================================
 
-// Keep in sync with luci-app-asclash/Makefile PKG_VERSION
-const ASCLASH_VERSION = '4.8.2.45';
-
 const ASCLASH_REPO = 'Desonator/ASClash';
 const ASCLASH_RELEASES_URL = 'https://github.com/' + ASCLASH_REPO + '/releases';
 const ASCLASH_LATEST_API  = 'https://api.github.com/repos/' + ASCLASH_REPO + '/releases/latest';
@@ -520,7 +517,7 @@ return view.extend({
             'id': 'asclash-version-footer',
             'style': 'margin-top: 20px; padding: 10px 0; border-top: 1px solid rgba(127,127,127,0.15); text-align: center; font-size: 11px; color: #999;'
         }, [
-            E('span', {}, 'ASClash v' + ASCLASH_VERSION),
+            E('span', {}, 'ASClash v' + view_asclash_utils.ASCLASH_VERSION),
             dot(),
             E('span', {}, [
                 'Modified by ',
@@ -586,7 +583,7 @@ return view.extend({
                 return;
             }
 
-            if (cmpSemver(latest.version, ASCLASH_VERSION) > 0) {
+            if (cmpSemver(latest.version, view_asclash_utils.ASCLASH_VERSION) > 0) {
                 status.textContent = '';
                 status.appendChild(E('a', {
                     'href': latest.url,
