@@ -1297,6 +1297,7 @@ extract_grouped_port_rules() {
 
         sub(/^-[[:space:]]*/, "", line)
         if (!match(line, /,[^,()]+$/)) { note("malformed-rule-or-missing-action", line); next }
+        rule_body = substr(line, 1, RSTART - 1)
         action = trim(substr(line, RSTART + 1, RLENGTH - 1))
         if (action == "") { note("missing-action", line); next }
         action_check = toupper(action)
@@ -1305,6 +1306,22 @@ extract_grouped_port_rules() {
             note("excluded-action-" action_check, line)
             next
         }
+
+        # Grouped firewall rules may implement only these AND operands. Never
+        # silently widen a rule by dropping DOMAIN, SRC-IP-CIDR or another
+        # matcher: source CIDRs are handled by the separate per-device policy.
+        matcher_rest = rule_body
+        unsupported = ""
+        while (match(matcher_rest, /\([A-Za-z][A-Za-z0-9_-]*,/)) {
+            matcher = substr(matcher_rest, RSTART + 1, RLENGTH - 2)
+            matcher = toupper(matcher)
+            if (matcher != "RULE-SET" && matcher != "IP-CIDR" && matcher != "NETWORK" && matcher != "DST-PORT") {
+                unsupported = matcher
+                break
+            }
+            matcher_rest = substr(matcher_rest, RSTART + RLENGTH)
+        }
+        if (unsupported != "") { note("unsupported-condition-" tolower(unsupported), line); next }
 
         # Collect the CIDR operands of this AND rule. Multiple operands are
         # intersected later; treating them as separate groups would turn AND
@@ -1322,8 +1339,8 @@ extract_grouped_port_rules() {
             rest = substr(rest, RSTART + RLENGTH)
         }
         rest = line
-        while (match(rest, /IP-CIDR,[^,()[:space:]]+/)) {
-            token = substr(rest, RSTART + 8, RLENGTH - 8)
+        while (match(rest, /[(,]IP-CIDR,[^,()[:space:]]+/)) {
+            token = substr(rest, RSTART + 9, RLENGTH - 9)
             token = trim(token)
             if (token != "") {
                 operand_spec = operand_spec (operand_count++ ? ";" : "") "IP-CIDR:" token
