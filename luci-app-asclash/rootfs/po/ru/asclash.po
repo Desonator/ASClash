@@ -1657,3 +1657,18 @@ msgstr "Применение grouped nftables"
 msgid "IP-CIDR set application"
 msgstr "Применение IP-CIDR-набора"
 
+msgid "Subscription file scanning"
+msgstr "Чтение файлов подписок"
+
+msgid "Subscription DNS resolution"
+msgstr "DNS-разрешение серверов подписок"
+
+msgid "Subscription servers: %d · Unique addresses: %d"
+msgstr "Серверов подписок: %d · Уникальных адресов: %d"
+
+msgid "Subscription DNS lookups: %d · Failed: %d"
+msgstr "DNS-запросов подписок: %d · Ошибок: %d"
+
+msgid "Subscription provider read failures: %d"
+msgstr "Ошибок чтения подписок: %d"
+

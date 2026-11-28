@@ -352,12 +352,13 @@ function performanceStageLabel(stage) {
 		provider_parse: _('Provider parsing'), provider: _('Parsed providers'),
 		plain_list: _('IP-CIDR list without conditions'), grouped_list: _('IP-CIDR list with AND conditions'),
 		firewall_apply: _('Firewall application'), grouped_nft: _('Grouped nftables application'),
-		plain_nft: _('IP-CIDR set application') })[stage] || stage;
+		plain_nft: _('IP-CIDR set application'), subscription_scan: _('Subscription file scanning'),
+		subscription_dns: _('Subscription DNS resolution') })[stage] || stage;
 }
 
 function parseListDiagnostics(text) {
 	const report = {
-		performance: { timings: [], cache: [] },
+		performance: { timings: [], cache: [], subscription: {} },
 		cycle: { phase: 'unknown', time: 0, trigger: 'unknown' },
 		fakeip: { state: 'unknown', fallback: false, issues: [] },
 		grouped: { state: 'unknown', fallback: false, issues: [] }
@@ -366,6 +367,7 @@ function parseListDiagnostics(text) {
 		const [kind, a, b, c, d] = line.split('|');
 		if (kind === 'timing') report.performance.timings.push({ stage: a, ms: Number(b) || 0, calls: Number(c) || 0, errors: Number(d) || 0 });
 		else if (kind === 'cache') report.performance.cache.push({ stage: a, outcome: b, count: Number(c) || 0 });
+		else if (kind === 'subscription') report.performance.subscription[a] = { total: Number(b) || 0, unique: Number(c) || 0 };
 		if (kind === 'cycle') report.cycle = { phase: a || 'unknown', time: Number(b) || 0, trigger: c || 'unknown' };
 		else if (kind === 'fakeip') report.fakeip = { ...report.fakeip, state: a || 'unknown', fallback: b === 'true' };
 		else if (kind === 'grouped') report.grouped = { ...report.grouped, state: a || 'unknown', fallback: b === 'true' };
@@ -621,7 +623,10 @@ return view.extend({
 						E('div', {}, listDiagnostics.performance.timings.map(row => E('div', {},
 							performanceStageLabel(row.stage) + ': ' + _('%d ms · Calls: %d · Errors: %d').format(row.ms, row.calls, row.errors)))),
 						E('div', {}, listDiagnostics.performance.cache.map(row => E('div', {},
-							performanceStageLabel(row.stage) + ': ' + (row.outcome === 'hit' ? _('Cache hit') : _('Cache miss')) + ' × ' + row.count)))
+							performanceStageLabel(row.stage) + ': ' + (row.outcome === 'hit' ? _('Cache hit') : _('Cache miss')) + ' × ' + row.count))),
+						listDiagnostics.performance.subscription.servers ? E('div', {}, _('Subscription servers: %d · Unique addresses: %d').format(listDiagnostics.performance.subscription.servers.total, listDiagnostics.performance.subscription.servers.unique)) : null,
+						listDiagnostics.performance.subscription.dns ? E('div', {}, _('Subscription DNS lookups: %d · Failed: %d').format(listDiagnostics.performance.subscription.dns.total, listDiagnostics.performance.subscription.dns.unique)) : null,
+						listDiagnostics.performance.subscription.provider_errors && listDiagnostics.performance.subscription.provider_errors.total ? E('div', {}, _('Subscription provider read failures: %d').format(listDiagnostics.performance.subscription.provider_errors.total)) : null
 					])
 			])
 		]);

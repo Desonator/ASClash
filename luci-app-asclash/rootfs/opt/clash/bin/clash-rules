@@ -229,9 +229,11 @@ write_list_diagnostics() {
             awk -F'|' '
                 $1 == "timing" { total[$2]+=$3; calls[$2]++; if ($4 != 0) errors[$2]++ }
                 $1 == "cache" { cache[$2 FS $3]++ }
+                $1 == "subscription" { subscription[$2]=$3 FS $4 }
                 END {
                     for (stage in total) print "timing|" stage "|" total[stage] "|" calls[stage] "|" (errors[stage]+0)
                     for (key in cache) print "cache|" key "|" cache[key]
+                    for (key in subscription) print "subscription|" key "|" subscription[key]
                 }
             ' "$ASCLASH_PROFILE_FILE"
         fi
@@ -861,8 +863,8 @@ extract_servers_from_subscription() {
 
 # Function to extract IP addresses from all subscription files
 extract_subscription_ips() {
-    local providers_info
-    local base_dir
+    local providers_info base_dir provider_name path interval full_path server resolved_ips
+    local workdir domains_failed domains_total provider_failures candidate_count unique_count scan_start dns_start
 
     providers_info=$(extract_proxy_providers)
     if [ -z "$providers_info" ]; then
@@ -871,7 +873,13 @@ extract_subscription_ips() {
 
     base_dir=$(get_providers_base_dir)
 
-    echo "$providers_info" | while IFS='|' read -r provider_name path interval; do
+    workdir=$(mktemp -d /tmp/clash/subscription-scan.XXXXXX) || return 1
+    scan_start=$(profile_now_ms)
+    domains_failed=0
+    domains_total=0
+    provider_failures=0
+    : > "$workdir/servers"
+    while IFS='|' read -r provider_name path interval; do
         [ -z "$provider_name" ] && continue
 
         # Convert relative path to absolute path
@@ -882,25 +890,52 @@ extract_subscription_ips() {
         esac
 
         if [ -f "$full_path" ]; then
-            local subscription_servers=$(extract_servers_from_subscription "$full_path")
-            if [ -n "$subscription_servers" ]; then
-                echo "$subscription_servers" | while IFS= read -r server; do
-                    [ -z "$server" ] && continue
-                    if is_valid_ip "$server"; then
-                        echo "$server"
-                    else
-                        # Resolve domain to IP addresses
-                        local resolved_ips=$(resolve_domain "$server")
-                        if [ -n "$resolved_ips" ]; then
-                            echo "$resolved_ips"
-                        fi
-                    fi
-                done
+            if ! extract_servers_from_subscription "$full_path" >> "$workdir/servers"; then
+                provider_failures=$((provider_failures + 1))
+                msg "WARNING: Failed to read subscription provider: $provider_name"
             fi
         else
             msg "WARNING: Subscription file not found: $full_path"
+            provider_failures=$((provider_failures + 1))
         fi
-    done
+    done <<EOF
+$providers_info
+EOF
+    candidate_count=$(awk 'NF { n++ } END { print n+0 }' "$workdir/servers")
+    if ! LC_ALL=C sort -u "$workdir/servers" > "$workdir/unique"; then
+        rm -f "$workdir/servers" "$workdir/unique"
+        rmdir "$workdir"
+        return 1
+    fi
+    unique_count=$(awk 'NF { n++ } END { print n+0 }' "$workdir/unique")
+    [ -z "$ASCLASH_PROFILE_FILE" ] || {
+        printf 'timing|subscription_scan|%s|0\n' "$(($(profile_now_ms) - scan_start))" >> "$ASCLASH_PROFILE_FILE"
+        printf 'subscription|servers|%s|%s\n' "$candidate_count" "$unique_count" >> "$ASCLASH_PROFILE_FILE"
+    }
+    dns_start=$(profile_now_ms)
+    while IFS= read -r server; do
+        [ -n "$server" ] || continue
+        if is_valid_ip "$server"; then
+            printf '%s\n' "$server"
+        else
+            domains_total=$((domains_total + 1))
+            resolved_ips=$(resolve_domain "$server")
+            if [ -n "$resolved_ips" ]; then
+                printf '%s\n' "$resolved_ips"
+            else
+                domains_failed=$((domains_failed + 1))
+                msg "WARNING: Could not resolve subscription server: $server"
+            fi
+        fi
+    done < "$workdir/unique"
+    [ -z "$ASCLASH_PROFILE_FILE" ] || {
+        printf 'timing|subscription_dns|%s|0\n' "$(($(profile_now_ms) - dns_start))" >> "$ASCLASH_PROFILE_FILE"
+        printf 'subscription|dns|%s|%s\n' "$domains_total" "$domains_failed" >> "$ASCLASH_PROFILE_FILE"
+        printf 'subscription|provider_errors|%s|0\n' "$provider_failures" >> "$ASCLASH_PROFILE_FILE"
+    }
+    rm -f "$workdir/servers" "$workdir/unique"
+    rmdir "$workdir"
+    [ "$domains_failed" -eq 0 ] && [ "$provider_failures" -eq 0 ]
 }
 
 # Function to create subscription IP cache with locking
@@ -946,17 +981,29 @@ cache_subscription_ips() {
     done
 
     # Create cache (store unique, sorted IPs for consistency and nicer logging)
-    local cached_ips
-    cached_ips=$(extract_subscription_ips | sort -u)
-    if [ -n "$cached_ips" ]; then
-        echo "$cached_ips" > "$SUBSCRIPTION_CACHE_FILE.tmp"
-        mv "$SUBSCRIPTION_CACHE_FILE.tmp" "$SUBSCRIPTION_CACHE_FILE"
-        msg "Subscription IPs cached successfully"
+    local cached_ips raw_ips cache_rc=0
+    raw_ips="${SUBSCRIPTION_CACHE_FILE}.raw.$$"
+    cached_ips="${SUBSCRIPTION_CACHE_FILE}.tmp.$$"
+    if ! extract_subscription_ips > "$raw_ips"; then
+        msg "WARNING: Subscription refresh incomplete; preserving previous IP cache"
+        cache_rc=0
+    elif ! LC_ALL=C sort -u "$raw_ips" > "$cached_ips"; then
+        cache_rc=1
+    elif [ -s "$cached_ips" ]; then
+        if mv -f "$cached_ips" "$SUBSCRIPTION_CACHE_FILE"; then
+            msg "Subscription IPs cached successfully"
+        else
+            cache_rc=1
+        fi
+    else
+        msg "WARNING: No subscription IPs extracted; preserving previous IP cache"
+        cache_rc=1
     fi
+    rm -f "$raw_ips" "$cached_ips"
 
     # Release lock
     rmdir "$SUBSCRIPTION_LOCK_FILE" 2>/dev/null
-    return 0
+    return "$cache_rc"
 }
 
 # =============================================================================

@@ -1641,3 +1641,18 @@ msgstr "分组 nftables 应用"
 msgid "IP-CIDR set application"
 msgstr "IP-CIDR 集合应用"
 
+msgid "Subscription file scanning"
+msgstr "订阅文件扫描"
+
+msgid "Subscription DNS resolution"
+msgstr "订阅 DNS 解析"
+
+msgid "Subscription servers: %d · Unique addresses: %d"
+msgstr "订阅服务器：%d · 唯一地址：%d"
+
+msgid "Subscription DNS lookups: %d · Failed: %d"
+msgstr "订阅 DNS 查询：%d · 失败：%d"
+
+msgid "Subscription provider read failures: %d"
+msgstr "订阅读取错误：%d"
+

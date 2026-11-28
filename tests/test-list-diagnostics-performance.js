@@ -10,5 +10,6 @@ const report = parse('cycle|complete|123|update\ntiming|plain_list|110|2|1\ncach
 assert.deepStrictEqual(report.performance.timings, [{ stage: 'plain_list', ms: 110, calls: 2, errors: 1 }]);
 assert.deepStrictEqual(report.performance.cache, [{ stage: 'provider', outcome: 'hit', count: 5 }, { stage: 'provider', outcome: 'miss', count: 2 }]);
 assert.equal(report.fakeip.state, 'applied');
-assert.deepStrictEqual(parse('fakeip|applied|false').performance, { timings: [], cache: [] });
+assert.deepStrictEqual(parse('subscription|servers|12|3\nsubscription|dns|2|1').performance.subscription, { servers: { total: 12, unique: 3 }, dns: { total: 2, unique: 1 } });
+assert.deepStrictEqual(parse('fakeip|applied|false').performance, { timings: [], cache: [], subscription: {} });
 console.log('Performance diagnostics and legacy reports parsed correctly.');
